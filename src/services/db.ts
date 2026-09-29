@@ -1,6 +1,7 @@
 import { AppDatabaseSchema, UserSettings } from '../types/finance';
 
 export const GAS_WEB_APP_URL =
+  (import.meta.env.VITE_GAS_WEB_APP_URL as string) ||
   'https://script.google.com/macros/s/AKfycbz1JD24-hIfPuqo6nQdxtxeOUI3hqH3D4t9vGAMTCmawEmRKc75xqfcgFtOGaqGtpMAuw/exec';
 
 export const STORES = [
