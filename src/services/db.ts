@@ -80,13 +80,92 @@ export function isRowEmpty(row: any): boolean {
   );
 }
 
+export const SAMPLE_IDS = new Set([
+  'acc-hdfc-salary',
+  'acc-icici-savings',
+  'acc-cash-wallet',
+  'acc-regalia-card',
+  'acc-zerodha',
+  'inc-1',
+  'inc-2',
+  'inc-3',
+  'inc-4',
+  'exp-1',
+  'exp-2',
+  'exp-3',
+  'exp-4',
+  'exp-5',
+  'exp-6',
+  'exp-7',
+  'exp-8',
+  'emi-1',
+  'emi-2',
+  'tr-1',
+  'tr-2',
+  'cc-1',
+  'ccb-1',
+  'ccb-2',
+  'goal-1',
+  'goal-2',
+  'goal-3',
+  'rec-1',
+  'rec-2',
+  'rec-3',
+  'tax-1',
+  'tax-2',
+  'tax-3',
+  'tax-4',
+  'nw-1',
+  'nw-2',
+  'nw-3',
+]);
+
+/**
+ * Strips any leftover sample data from localStorage
+ */
+export function purgeAllSampleDataFromLocalStorage(): void {
+  try {
+    for (const store of STORES) {
+      const key = `gas_cache_${store}`;
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const items = JSON.parse(raw);
+        if (Array.isArray(items)) {
+          const cleaned = items.filter((i) => !i?.id || !SAMPLE_IDS.has(String(i.id)));
+          if (cleaned.length !== items.length) {
+            localStorage.setItem(key, JSON.stringify(cleaned));
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// Auto-run cache sanitation immediately on module load
+if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+  purgeAllSampleDataFromLocalStorage();
+}
+
 /**
  * Local storage caching helper for offline resilience and instant rendering
+ * Automatically excludes fabricated sample data.
  */
 export function getCachedStore<T>(storeName: StoreName): T[] | null {
+  if (typeof localStorage === 'undefined') return null;
   try {
     const raw = localStorage.getItem(`gas_cache_${storeName}`);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed: any[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((item) => !item?.id || !SAMPLE_IDS.has(String(item.id)));
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(`gas_cache_${storeName}`, JSON.stringify(cleaned));
+        }
+        return cleaned as T[];
+      }
+    }
   } catch {
     // ignore
   }
@@ -94,8 +173,13 @@ export function getCachedStore<T>(storeName: StoreName): T[] | null {
 }
 
 export function setCachedStore<T>(storeName: StoreName, items: T[]) {
+  if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(`gas_cache_${storeName}`, JSON.stringify(items));
+    // Never persist sample entries
+    const safeItems = Array.isArray(items)
+      ? items.filter((item: any) => !item?.id || !SAMPLE_IDS.has(String(item.id)))
+      : items;
+    localStorage.setItem(`gas_cache_${storeName}`, JSON.stringify(safeItems));
   } catch {
     // ignore
   }
@@ -499,9 +583,9 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
 
 /**
  * Calls Google Apps Script Web App: GET ?sheet=SheetName
- * Includes a 5s AbortController timeout to guarantee UI responsiveness
+ * Includes a 15s AbortController timeout to handle Google Apps Script cold-starts
  */
-export async function apiGet<T>(sheetName: string, timeoutMs: number = 5000): Promise<T[]> {
+export async function apiGet<T>(sheetName: string, timeoutMs: number = 15000): Promise<T[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();

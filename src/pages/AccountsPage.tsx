@@ -189,7 +189,14 @@ export const AccountsPage: React.FC<AccountsPageProps> = ({
 
       {/* Accounts Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredAccounts.map((account) => {
+        {filteredAccounts.length === 0 ? (
+          <div className="col-span-full py-12 px-4 text-center rounded-2xl border border-dashed border-white/10 bg-slate-900/20 backdrop-blur-md">
+            <Wallet className="w-10 h-10 text-slate-500 mx-auto mb-2 opacity-50" />
+            <p className="text-sm font-medium text-slate-300">No accounts configured yet</p>
+            <p className="text-xs text-slate-500 mt-1">Click &quot;Add Account&quot; to configure your first account.</p>
+          </div>
+        ) : (
+          filteredAccounts.map((account) => {
           const liveBalance = liveBalances.get(account.id) ?? account.openingBalance;
           const isNegative = liveBalance < 0;
 
@@ -274,7 +281,8 @@ export const AccountsPage: React.FC<AccountsPageProps> = ({
               </div>
             </GlassCard>
           );
-        })}
+        })
+      )}
       </div>
 
       {/* Edit Account Modal */}

@@ -141,67 +141,60 @@ export const PAGE_STORE_MAP: Record<string, db.StoreName[]> = {
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const currentMonthInitial = new Date().toISOString().slice(0, 7);
-  const sample = useMemo(() => getSampleDatabase(), []);
 
-  const getInitialStore = <T,>(store: db.StoreName, fallback: T[]): T[] => {
-    const cached = db.getCachedStore<T>(store);
-    return cached && Array.isArray(cached) && cached.length > 0 ? cached : fallback;
-  };
-
-  // Hydrate immediately from local cache or fallback to sample data
-  // Guarantees 0ms initial paint — zero blank or black screen!
-  const [accounts, setAccounts] = useState<Account[]>(() =>
-    getInitialStore<Account>('accounts', sample.accounts)
+  // Clean initial state: hydrated ONLY from sanitized local cache or empty arrays.
+  // Zero fabricated/dummy entries!
+  const [accounts, setAccounts] = useState<Account[]>(
+    () => db.getCachedStore<Account>('accounts') || []
   );
-  const [incomes, setIncomes] = useState<Income[]>(() =>
-    getInitialStore<Income>('incomes', sample.incomes)
+  const [incomes, setIncomes] = useState<Income[]>(
+    () => db.getCachedStore<Income>('incomes') || []
   );
-  const [expenses, setExpenses] = useState<Expense[]>(() =>
-    getInitialStore<Expense>('expenses', sample.expenses)
+  const [expenses, setExpenses] = useState<Expense[]>(
+    () => db.getCachedStore<Expense>('expenses') || []
   );
-  const [emis, setEmis] = useState<EmiLoan[]>(() =>
-    getInitialStore<EmiLoan>('emis', sample.emis)
+  const [emis, setEmis] = useState<EmiLoan[]>(
+    () => db.getCachedStore<EmiLoan>('emis') || []
   );
-  const [transfers, setTransfers] = useState<AccountTransfer[]>(() =>
-    getInitialStore<AccountTransfer>('transfers', sample.transfers)
+  const [transfers, setTransfers] = useState<AccountTransfer[]>(
+    () => db.getCachedStore<AccountTransfer>('transfers') || []
   );
-  const [creditCards, setCreditCards] = useState<CreditCard[]>(() =>
-    getInitialStore<CreditCard>('creditCards', sample.creditCards)
+  const [creditCards, setCreditCards] = useState<CreditCard[]>(
+    () => db.getCachedStore<CreditCard>('creditCards') || []
   );
-  const [creditCardBills, setCreditCardBills] = useState<CreditCardBill[]>(() =>
-    getInitialStore<CreditCardBill>('creditCardBills', sample.creditCardBills)
+  const [creditCardBills, setCreditCardBills] = useState<CreditCardBill[]>(
+    () => db.getCachedStore<CreditCardBill>('creditCardBills') || []
   );
-  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() =>
-    getInitialStore<SavingsGoal>('savingsGoals', sample.savingsGoals)
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(
+    () => db.getCachedStore<SavingsGoal>('savingsGoals') || []
   );
-  const [recurringBills, setRecurringBills] = useState<RecurringBill[]>(() =>
-    getInitialStore<RecurringBill>('recurringBills', sample.recurringBills)
+  const [recurringBills, setRecurringBills] = useState<RecurringBill[]>(
+    () => db.getCachedStore<RecurringBill>('recurringBills') || []
   );
-  const [taxSavings, setTaxSavings] = useState<TaxSavingItem[]>(() =>
-    getInitialStore<TaxSavingItem>('taxSavings', sample.taxSavings)
+  const [taxSavings, setTaxSavings] = useState<TaxSavingItem[]>(
+    () => db.getCachedStore<TaxSavingItem>('taxSavings') || []
   );
-  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(() =>
-    getInitialStore<BudgetCategory>('budgetCategories', db.DEFAULT_BUDGET_CATEGORIES)
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(
+    () => db.getCachedStore<BudgetCategory>('budgetCategories') || db.DEFAULT_BUDGET_CATEGORIES
   );
-  const [netWorthSnapshots, setNetWorthSnapshots] = useState<NetWorthSnapshot[]>(() =>
-    getInitialStore<NetWorthSnapshot>('netWorthSnapshots', sample.netWorthSnapshots)
+  const [netWorthSnapshots, setNetWorthSnapshots] = useState<NetWorthSnapshot[]>(
+    () => db.getCachedStore<NetWorthSnapshot>('netWorthSnapshots') || []
   );
 
   const [settings, setSettings] = useState<UserSettings>(() => {
     const cached = db.getCachedStore<any>('settings');
-    if (cached && cached.length > 0) {
-      const map = new Map<string, any>();
+    const map = new Map<string, any>();
+    if (cached && Array.isArray(cached) && cached.length > 0) {
       cached.forEach((s: any) => map.set(s.key, s.value));
-      return {
-        currency: map.get('currency') || '₹',
-        savingsRateTarget: map.get('savingsRateTarget') ?? 20,
-        emergencyFundTargetMonths: map.get('emergencyFundTargetMonths') ?? 6,
-        section80cLimit: map.get('section80cLimit') ?? 150000,
-        section80dLimit: map.get('section80dLimit') ?? 25000,
-        activeMonth: map.get('activeMonth') || currentMonthInitial,
-      };
     }
-    return sample.settings;
+    return {
+      currency: map.get('currency') || '₹',
+      savingsRateTarget: map.get('savingsRateTarget') ?? 20,
+      emergencyFundTargetMonths: map.get('emergencyFundTargetMonths') ?? 6,
+      section80cLimit: map.get('section80cLimit') ?? 150000,
+      section80dLimit: map.get('section80dLimit') ?? 25000,
+      activeMonth: map.get('activeMonth') || currentMonthInitial,
+    };
   });
 
   const [selectedMonth, setSelectedMonth] = useState(() => settings.activeMonth || currentMonthInitial);
@@ -217,44 +210,45 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const fetchedStoresRef = useRef<Set<db.StoreName>>(new Set());
   const inFlightStoresRef = useRef<Set<db.StoreName>>(new Set());
 
+  // Applies fetched sheet data directly, fully replacing state even when a sheet is empty
   const applyStoreData = useCallback((storeName: db.StoreName, data: any[]) => {
     if (!Array.isArray(data)) return;
     switch (storeName) {
       case 'accounts':
-        if (data.length > 0) setAccounts(data);
+        setAccounts(data);
         break;
       case 'incomes':
-        if (data.length > 0) setIncomes(data);
+        setIncomes(data);
         break;
       case 'expenses':
-        if (data.length > 0) setExpenses(data);
+        setExpenses(data);
         break;
       case 'emis':
-        if (data.length > 0) setEmis(data);
+        setEmis(data);
         break;
       case 'transfers':
-        if (data.length > 0) setTransfers(data);
+        setTransfers(data);
         break;
       case 'creditCards':
-        if (data.length > 0) setCreditCards(data);
+        setCreditCards(data);
         break;
       case 'creditCardBills':
-        if (data.length > 0) setCreditCardBills(data);
+        setCreditCardBills(data);
         break;
       case 'savingsGoals':
-        if (data.length > 0) setSavingsGoals(data);
+        setSavingsGoals(data);
         break;
       case 'recurringBills':
-        if (data.length > 0) setRecurringBills(data);
+        setRecurringBills(data);
         break;
       case 'taxSavings':
-        if (data.length > 0) setTaxSavings(data);
+        setTaxSavings(data);
         break;
       case 'budgetCategories':
         setBudgetCategories(data.length > 0 ? data : db.DEFAULT_BUDGET_CATEGORIES);
         break;
       case 'netWorthSnapshots':
-        if (data.length > 0) setNetWorthSnapshots(data);
+        setNetWorthSnapshots(data);
         break;
     }
   }, []);
