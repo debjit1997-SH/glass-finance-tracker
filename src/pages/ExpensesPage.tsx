@@ -399,7 +399,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Expected Amount ({settings.currency})
+                  Expected Amount ({settings.currency}) <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="number"
@@ -418,16 +418,42 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
 
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Status
+                  Actual Amount Paid ({settings.currency})
                 </label>
-                <select
-                  value={editingExpense.status}
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={editingExpense.actualAmount ?? ''}
                   onChange={(e) =>
                     setEditingExpense({
                       ...editingExpense,
-                      status: e.target.value as ExpenseStatus,
+                      actualAmount: parseFloat(e.target.value) || 0,
                     })
                   }
+                  className="glass-input w-full mt-1 text-sm font-semibold text-rose-300"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Payment Status
+                </label>
+                <select
+                  value={editingExpense.status}
+                  onChange={(e) => {
+                    const newStatus = e.target.value as ExpenseStatus;
+                    setEditingExpense({
+                      ...editingExpense,
+                      status: newStatus,
+                      actualAmount:
+                        newStatus === 'Paid' && !editingExpense.actualAmount
+                          ? editingExpense.expectedAmount
+                          : editingExpense.actualAmount,
+                    });
+                  }}
                   className="glass-input w-full mt-1 text-sm bg-slate-900"
                 >
                   <option value="Paid">Paid</option>
@@ -435,17 +461,21 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                   <option value="Overdue">Overdue</option>
                 </select>
               </div>
-            </div>
 
-            {editingExpense.status === 'Paid' && (
-              <GlassDatePicker
-                label="Actual Payment Date"
-                value={editingExpense.actualDate}
-                onChange={(e) =>
-                  setEditingExpense({ ...editingExpense, actualDate: e.target.value })
-                }
-              />
-            )}
+              {editingExpense.status === 'Paid' ? (
+                <GlassDatePicker
+                  label="Actual Payment Date"
+                  value={editingExpense.actualDate}
+                  onChange={(e) =>
+                    setEditingExpense({ ...editingExpense, actualDate: e.target.value })
+                  }
+                />
+              ) : (
+                <div className="flex items-end pb-2 text-xs text-slate-400 italic">
+                  Status is {editingExpense.status}
+                </div>
+              )}
+            </div>
 
             <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/10">
               <button

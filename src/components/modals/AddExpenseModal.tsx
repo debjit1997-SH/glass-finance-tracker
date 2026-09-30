@@ -40,8 +40,13 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ isOpen, onClos
 
     setIsSubmitting(true);
     try {
-      const expAmt = parseFloat(expectedAmount);
-      const actAmt = actualAmount ? parseFloat(actualAmount) : status === 'Paid' ? expAmt : 0;
+      const expAmt = parseFloat(expectedAmount) || 0;
+      const actAmt =
+        actualAmount !== ''
+          ? parseFloat(actualAmount) || 0
+          : status === 'Paid'
+          ? expAmt
+          : 0;
 
       // Auto check overdue
       let finalStatus = status;
@@ -145,11 +150,11 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ isOpen, onClos
           </div>
         </div>
 
-        {/* Expected Amount & Status */}
+        {/* Expected Amount & Actual Amount */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-              Amount ({settings.currency}) <span className="text-rose-400">*</span>
+              Expected Amount ({settings.currency}) <span className="text-rose-400">*</span>
             </label>
             <input
               type="number"
@@ -158,14 +163,35 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ isOpen, onClos
               required
               placeholder="0.00"
               value={expectedAmount}
-              onChange={(e) => {
-                setExpectedAmount(e.target.value);
-                if (!actualAmount) setActualAmount(e.target.value);
-              }}
+              onChange={(e) => setExpectedAmount(e.target.value)}
               className="glass-input w-full mt-1 text-sm font-semibold"
             />
           </div>
 
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+              Actual Amount Paid ({settings.currency})
+            </label>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              placeholder={
+                status === 'Paid'
+                  ? expectedAmount
+                    ? expectedAmount
+                    : '0.00'
+                  : '0.00 (Unpaid)'
+              }
+              value={actualAmount}
+              onChange={(e) => setActualAmount(e.target.value)}
+              className="glass-input w-full mt-1 text-sm font-semibold text-rose-300"
+            />
+          </div>
+        </div>
+
+        {/* Payment Status & Actual Payment Date */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
               Payment Status <span className="text-rose-400">*</span>
@@ -180,16 +206,19 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ isOpen, onClos
               <option value="Overdue">Overdue</option>
             </select>
           </div>
-        </div>
 
-        {/* If Paid: Actual Payment Date */}
-        {status === 'Paid' && (
-          <GlassDatePicker
-            label="Actual Payment Date"
-            value={actualDate}
-            onChange={(e) => setActualDate(e.target.value)}
-          />
-        )}
+          {status === 'Paid' ? (
+            <GlassDatePicker
+              label="Actual Payment Date"
+              value={actualDate}
+              onChange={(e) => setActualDate(e.target.value)}
+            />
+          ) : (
+            <div className="flex items-end pb-2 text-xs text-slate-400 italic">
+              Status is {status} — payment date recorded when settled
+            </div>
+          )}
+        </div>
 
         {/* Notes */}
         <div>

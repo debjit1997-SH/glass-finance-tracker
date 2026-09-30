@@ -35,8 +35,13 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({ isOpen, onClose 
 
     setIsSubmitting(true);
     try {
-      const expAmt = parseFloat(expectedAmount);
-      const actAmt = actualAmount ? parseFloat(actualAmount) : status === 'Received' ? expAmt : 0;
+      const expAmt = parseFloat(expectedAmount) || 0;
+      const actAmt =
+        actualAmount !== ''
+          ? parseFloat(actualAmount) || 0
+          : status === 'Received'
+          ? expAmt
+          : 0;
 
       await addIncome({
         date,
@@ -142,10 +147,7 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({ isOpen, onClose 
               required
               placeholder="0.00"
               value={expectedAmount}
-              onChange={(e) => {
-                setExpectedAmount(e.target.value);
-                if (!actualAmount) setActualAmount(e.target.value);
-              }}
+              onChange={(e) => setExpectedAmount(e.target.value)}
               className="glass-input w-full mt-1 text-sm font-semibold"
             />
           </div>
@@ -158,7 +160,13 @@ export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({ isOpen, onClose 
               type="number"
               step="any"
               min="0"
-              placeholder="0.00"
+              placeholder={
+                status === 'Received'
+                  ? expectedAmount
+                    ? expectedAmount
+                    : '0.00'
+                  : '0.00 (Pending)'
+              }
               value={actualAmount}
               onChange={(e) => setActualAmount(e.target.value)}
               className="glass-input w-full mt-1 text-sm font-semibold text-emerald-400"
