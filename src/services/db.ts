@@ -1,7 +1,22 @@
-import { AppDatabaseSchema, UserSettings } from '../types/finance';
+import {
+  Account,
+  Income,
+  Expense,
+  EmiLoan,
+  AccountTransfer,
+  CreditCard,
+  CreditCardBill,
+  SavingsGoal,
+  RecurringBill,
+  TaxSavingItem,
+  BudgetCategory,
+  NetWorthSnapshot,
+  AppDatabaseSchema,
+  UserSettings,
+} from '../types/finance';
 
 export const GAS_WEB_APP_URL =
-  (import.meta.env.VITE_GAS_WEB_APP_URL as string) ||
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GAS_WEB_APP_URL as string) ||
   'https://script.google.com/macros/s/AKfycbz1JD24-hIfPuqo6nQdxtxeOUI3hqH3D4t9vGAMTCmawEmRKc75xqfcgFtOGaqGtpMAuw/exec';
 
 export const STORES = [
@@ -29,7 +44,7 @@ export const SHEET_NAMES: Record<StoreName, string> = {
   emis: 'EMI Tracker',
   transfers: 'Account Transfers',
   creditCards: 'Credit Card Tracker',
-  creditCardBills: 'Credit Card Bills',
+  creditCardBills: 'Credit Card Tracker',
   savingsGoals: 'Savings Goals',
   recurringBills: 'Recurring Bills',
   taxSavings: 'Tax Saver',
@@ -39,7 +54,7 @@ export const SHEET_NAMES: Record<StoreName, string> = {
 };
 
 // Default budget categories for instant startup without waiting for slow sheets
-export const DEFAULT_BUDGET_CATEGORIES = [
+export const DEFAULT_BUDGET_CATEGORIES: BudgetCategory[] = [
   { id: 'b-food', category: 'Food & Dining', monthlyLimit: 15000 },
   { id: 'b-groceries', category: 'Groceries', monthlyLimit: 12000 },
   { id: 'b-rent', category: 'Housing & Rent', monthlyLimit: 25000 },
@@ -51,17 +66,23 @@ export const DEFAULT_BUDGET_CATEGORIES = [
   { id: 'b-misc', category: 'Miscellaneous', monthlyLimit: 5000 },
 ];
 
-// Helper to check if a row is completely blank or has no meaningful values (ignores blank id-only rows)
+/**
+ * Checks if a row is completely blank or has no meaningful values (ignores id-only probe/corrupt rows)
+ */
 export function isRowEmpty(row: any): boolean {
   if (!row || typeof row !== 'object') return true;
-  const nonIdEntries = Object.entries(row).filter(([k]) => k.toLowerCase() !== 'id');
+  const nonIdEntries = Object.entries(row).filter(
+    ([k]) => !['id', 'key', '_rowindex'].includes(k.toLowerCase())
+  );
   if (nonIdEntries.length === 0) return true;
   return nonIdEntries.every(
     ([, v]) => v === null || v === undefined || String(v).trim() === ''
   );
 }
 
-// Local storage caching helper for offline resilience and instant rendering
+/**
+ * Local storage caching helper for offline resilience and instant rendering
+ */
 export function getCachedStore<T>(storeName: StoreName): T[] | null {
   try {
     const raw = localStorage.getItem(`gas_cache_${storeName}`);
@@ -80,82 +101,407 @@ export function setCachedStore<T>(storeName: StoreName, items: T[]) {
   }
 }
 
-// Numeric fields per store to guarantee proper type casting from Google Sheets rows
-const NUMERIC_FIELDS: Record<string, string[]> = {
-  accounts: ['openingBalance'],
-  incomes: ['expectedAmount', 'actualAmount'],
-  expenses: ['expectedAmount', 'actualAmount', 'amount'],
-  emis: ['monthlyAmount', 'outstandingPrincipal', 'interestRate'],
-  transfers: ['amount'],
-  creditCards: ['limit', 'currentUnbilled', 'statementDay', 'dueDay'],
-  creditCardBills: ['billAmount', 'amountPaid'],
-  savingsGoals: ['targetAmount', 'currentSaved'],
-  recurringBills: ['amount'],
-  taxSavings: ['amount'],
-  budgetCategories: ['monthlyLimit', 'monthlyBudget'],
-  netWorthSnapshots: ['totalAssets', 'totalLiabilities', 'netWorth'],
-};
+function formatDateString(val: any): string {
+  if (!val) return '';
+  const s = String(val).trim();
+  if (s.includes('T')) {
+    try {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    } catch {
+      // ignore
+    }
+    return s.split('T')[0];
+  }
+  return s;
+}
+
+function parseNumber(val: any, fallback = 0): number {
+  if (val === undefined || val === null || val === '') return fallback;
+  const n = Number(val);
+  return isNaN(n) ? fallback : n;
+}
 
 /**
- * Normalizes raw sheet rows by casting numbers, booleans, and JSON objects
- * Also normalizes PascalCase headers from Google Sheets to camelCase
+ * Explicit Bi-directional Mapping: Entity -> Exact Google Sheet Header Row
+ * Google Apps Script looks up row[headerName] case-sensitively.
  */
-function normalizeRow<T>(storeName: StoreName, rawRow: any): T {
-  if (!rawRow || typeof rawRow !== 'object') return rawRow;
+export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<string, any> {
+  if (!entity || typeof entity !== 'object') return entity;
 
-  // Convert keys to camelCase (e.g. 'OpeningBalance' -> 'openingBalance', 'Name' -> 'name')
-  const row: any = {};
-  for (const [key, value] of Object.entries(rawRow)) {
-    const camelKey = key.length > 0 ? key.charAt(0).toLowerCase() + key.slice(1) : key;
-    row[camelKey] = value;
+  switch (storeName) {
+    case 'accounts':
+      return {
+        id: String(entity.id || ''),
+        Name: String(entity.name || ''),
+        Type: String(entity.type || 'bank'),
+        OpeningBalance: parseNumber(entity.openingBalance, 0),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'incomes':
+      return {
+        id: String(entity.id || ''),
+        Date: formatDateString(entity.date),
+        Source: String(entity.source || ''),
+        ExpectedAmount: parseNumber(entity.expectedAmount, 0),
+        Account: String(entity.accountId || ''),
+        ActualAmount: parseNumber(entity.actualAmount, 0),
+        ActualDate: formatDateString(entity.actualDate),
+        Status: String(entity.status || 'Pending'),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'expenses':
+      return {
+        id: String(entity.id || ''),
+        Date: formatDateString(entity.date),
+        Name: String(entity.name || ''),
+        Category: String(entity.category || ''),
+        ExpectedAmount: parseNumber(entity.expectedAmount, 0),
+        Account: String(entity.accountId || ''),
+        ActualAmount: parseNumber(entity.actualAmount, 0),
+        ActualDate: formatDateString(entity.actualDate),
+        Status: String(entity.status || 'Pending'),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'emis':
+      return {
+        id: String(entity.id || ''),
+        LoanName: String(entity.loanName || ''),
+        Lender: String(entity.lender || ''),
+        MonthlyAmount: parseNumber(entity.monthlyAmount, 0),
+        OutstandingPrincipal: parseNumber(entity.outstandingPrincipal, 0),
+        InterestRate: parseNumber(entity.interestRate, 0),
+        DueDate: formatDateString(entity.dueDate),
+        Account: String(entity.accountId || ''),
+        Status: String(entity.status || 'Pending'),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'transfers':
+      return {
+        id: String(entity.id || ''),
+        Date: formatDateString(entity.date),
+        FromAccount: String(entity.fromAccountId || ''),
+        ToAccount: String(entity.toAccountId || ''),
+        Amount: parseNumber(entity.amount, 0),
+        Reason: String(entity.reason || ''),
+        Status: String(entity.status || 'Completed'),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'creditCards':
+      return {
+        id: String(entity.id || ''),
+        CardName: String(entity.name || ''),
+        CreditLimit: parseNumber(entity.limit, 0),
+        CurrentUnbilled: parseNumber(entity.currentUnbilled, 0),
+        StatementDate: entity.statementDay ? String(entity.statementDay) : '',
+        PaymentDueDate: entity.dueDay ? String(entity.dueDay) : '',
+        Notes: entity.bank ? `Bank: ${entity.bank}` : '',
+      };
+
+    case 'creditCardBills':
+      return {
+        id: String(entity.id || ''),
+        CardName: String(entity.cardId || ''),
+        BillingMonth: String(entity.billingMonth || ''),
+        StatementDate: formatDateString(entity.statementDate),
+        BillAmount: parseNumber(entity.billAmount, 0),
+        AmountPaid: parseNumber(entity.amountPaid, 0),
+        PaymentDueDate: formatDateString(entity.paymentDueDate),
+        PaymentDateActual: formatDateString(entity.paymentDateActual),
+        Status: String(entity.status || 'Pending'),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'savingsGoals':
+      return {
+        id: String(entity.id || ''),
+        GoalName: String(entity.name || ''),
+        TargetAmount: parseNumber(entity.targetAmount, 0),
+        TargetDate: formatDateString(entity.targetDate),
+        CurrentSaved: parseNumber(entity.currentSaved, 0),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'recurringBills':
+      return {
+        id: String(entity.id || ''),
+        Name: String(entity.name || ''),
+        Amount: parseNumber(entity.amount, 0),
+        Frequency: String(entity.frequency || 'Monthly'),
+        NextRenewalDate: formatDateString(entity.nextRenewalDate),
+        Category: String(entity.category || ''),
+        Account: String(entity.accountId || ''),
+        Notes: String(entity.notes || ''),
+      };
+
+    case 'taxSavings':
+      return {
+        id: String(entity.id || ''),
+        Name: String(entity.name || ''),
+        Section: String(entity.section || '80C'),
+        Amount: parseNumber(entity.amount, 0),
+        Date: formatDateString(entity.date),
+      };
+
+    case 'budgetCategories':
+      return {
+        id: String(entity.id || ''),
+        Category: String(entity.category || ''),
+        MonthlyBudget: parseNumber(entity.monthlyLimit, 0),
+        Month: String(entity.month || new Date().toISOString().slice(0, 7)),
+      };
+
+    case 'netWorthSnapshots':
+      return {
+        id: String(entity.id || ''),
+        Date: formatDateString(entity.date || entity.month),
+        TotalAssets: parseNumber(entity.totalAssets, 0),
+        TotalLiabilities: parseNumber(entity.totalLiabilities, 0),
+        NetWorth: parseNumber(entity.netWorth, 0),
+      };
+
+    default:
+      return entity;
   }
+}
 
-  // Ensure store-specific default fields
-  if (storeName === 'accounts') {
-    if (!row.name) row.name = row.Name || 'Account';
-    if (!row.type) row.type = (row.Type || 'bank').toLowerCase();
-  }
+/**
+ * Explicit Bi-directional Mapping: Google Sheet Row -> Clean Frontend Entity
+ */
+export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
+  if (!row || typeof row !== 'object') return row;
 
-  const numFields = NUMERIC_FIELDS[storeName] || [];
-
-  for (const field of numFields) {
-    if (field in row && row[field] !== undefined && row[field] !== null && row[field] !== '') {
-      const num = Number(row[field]);
-      row[field] = isNaN(num) ? 0 : num;
+  switch (storeName) {
+    case 'accounts': {
+      const res: Account = {
+        id: String(row.id || ''),
+        name: String(row.Name ?? row.name ?? 'Account'),
+        type: (row.Type ?? row.type ?? 'bank').toLowerCase() as any,
+        openingBalance: parseNumber(row.OpeningBalance ?? row.openingBalance, 0),
+        color: row.color || '#3b82f6',
+        accountNumberLast4: row.accountNumberLast4 || '',
+        isArchived: row.isArchived === true || row.isArchived === 'true',
+        createdAt: row.createdAt || new Date().toISOString(),
+      };
+      return res as unknown as T;
     }
-  }
 
-  // Common boolean fields
-  if ('isArchived' in row) row.isArchived = row.isArchived === true || row.isArchived === 'true';
-  if ('autoRenew' in row) row.autoRenew = row.autoRenew === true || row.autoRenew === 'true';
-  if ('isEmergencyFund' in row) row.isEmergencyFund = row.isEmergencyFund === true || row.isEmergencyFund === 'true';
+    case 'incomes': {
+      const res: Income = {
+        id: String(row.id || ''),
+        date: formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10),
+        source: String(row.Source ?? row.source ?? ''),
+        expectedAmount: parseNumber(row.ExpectedAmount ?? row.expectedAmount, 0),
+        actualAmount: parseNumber(row.ActualAmount ?? row.actualAmount, 0),
+        accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
+        actualDate: formatDateString(row.ActualDate ?? row.actualDate),
+        status: (row.Status ?? row.status ?? 'Pending') as any,
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
 
-  // Nested breakdowns for net worth snapshots if serialized as JSON strings in sheets
-  if (storeName === 'netWorthSnapshots') {
-    if (typeof row.assetBreakdown === 'string') {
-      try {
-        row.assetBreakdown = JSON.parse(row.assetBreakdown);
-      } catch {
-        row.assetBreakdown = { liquidAccounts: 0, investments: 0, cash: 0 };
+    case 'expenses': {
+      const res: Expense = {
+        id: String(row.id || ''),
+        date: formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10),
+        name: String(row.Name ?? row.name ?? ''),
+        category: String(row.Category ?? row.category ?? 'Miscellaneous'),
+        expectedAmount: parseNumber(row.ExpectedAmount ?? row.expectedAmount ?? row.amount, 0),
+        actualAmount: parseNumber(row.ActualAmount ?? row.actualAmount, 0),
+        accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
+        actualDate: formatDateString(row.ActualDate ?? row.actualDate),
+        status: (row.Status ?? row.status ?? 'Pending') as any,
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
+
+    case 'emis': {
+      const res: EmiLoan = {
+        id: String(row.id || ''),
+        loanName: String(row.LoanName ?? row.loanName ?? ''),
+        lender: String(row.Lender ?? row.lender ?? ''),
+        monthlyAmount: parseNumber(row.MonthlyAmount ?? row.monthlyAmount, 0),
+        outstandingPrincipal: parseNumber(row.OutstandingPrincipal ?? row.outstandingPrincipal, 0),
+        interestRate: parseNumber(row.InterestRate ?? row.interestRate, 0),
+        dueDate: formatDateString(row.DueDate ?? row.dueDate),
+        accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
+        status: (row.Status ?? row.status ?? 'Pending') as any,
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
+
+    case 'transfers': {
+      const res: AccountTransfer = {
+        id: String(row.id || ''),
+        date: formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10),
+        fromAccountId: String(row.FromAccount ?? row.fromAccountId ?? row.fromAccount ?? ''),
+        toAccountId: String(row.ToAccount ?? row.toAccountId ?? row.toAccount ?? ''),
+        amount: parseNumber(row.Amount ?? row.amount, 0),
+        reason: String(row.Reason ?? row.reason ?? ''),
+        status: (row.Status ?? row.status ?? 'Completed') as any,
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
+
+    case 'creditCards': {
+      const rawBank =
+        row.bank ||
+        (row.Notes && String(row.Notes).startsWith('Bank:')
+          ? String(row.Notes).replace('Bank:', '').trim()
+          : '');
+      const rawStmt = row.StatementDate ?? row.statementDay;
+      const rawDue = row.PaymentDueDate ?? row.dueDay;
+      const stmtDay = rawStmt
+        ? parseNumber(rawStmt, parseInt(String(rawStmt).split('-').pop() || '1'))
+        : 1;
+      const dueDay = rawDue
+        ? parseNumber(rawDue, parseInt(String(rawDue).split('-').pop() || '1'))
+        : 1;
+
+      const res: CreditCard = {
+        id: String(row.id || ''),
+        name: String(row.CardName ?? row.name ?? 'Credit Card'),
+        bank: rawBank,
+        limit: parseNumber(row.CreditLimit ?? row.limit, 0),
+        currentUnbilled: parseNumber(row.CurrentUnbilled ?? row.currentUnbilled, 0),
+        accountId: String(row.accountId || ''),
+        color: row.color || 'purple',
+        statementDay: stmtDay || 1,
+        dueDay: dueDay || 1,
+      };
+      return res as unknown as T;
+    }
+
+    case 'creditCardBills': {
+      const res: CreditCardBill = {
+        id: String(row.id || ''),
+        cardId: String(row.CardName ?? row.cardId ?? row.id ?? ''),
+        billingMonth: String(row.BillingMonth ?? row.billingMonth ?? ''),
+        statementDate: formatDateString(row.StatementDate ?? row.statementDate),
+        billAmount: parseNumber(row.BillAmount ?? row.billAmount, 0),
+        amountPaid: parseNumber(row.AmountPaid ?? row.amountPaid, 0),
+        paymentDueDate: formatDateString(row.PaymentDueDate ?? row.paymentDueDate),
+        paymentDateActual: formatDateString(row.PaymentDateActual ?? row.paymentDateActual),
+        status: (row.Status ?? row.status ?? 'Pending') as any,
+      };
+      return res as unknown as T;
+    }
+
+    case 'savingsGoals': {
+      const res: SavingsGoal = {
+        id: String(row.id || ''),
+        name: String(row.GoalName ?? row.name ?? ''),
+        targetAmount: parseNumber(row.TargetAmount ?? row.targetAmount, 0),
+        targetDate: formatDateString(row.TargetDate ?? row.targetDate),
+        currentSaved: parseNumber(row.CurrentSaved ?? row.currentSaved, 0),
+        category: String(row.category || 'General'),
+        icon: String(row.icon || 'Target'),
+        color: String(row.color || 'blue'),
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
+
+    case 'recurringBills': {
+      const res: RecurringBill = {
+        id: String(row.id || ''),
+        name: String(row.Name ?? row.name ?? ''),
+        amount: parseNumber(row.Amount ?? row.amount, 0),
+        frequency: (row.Frequency ?? row.frequency ?? 'Monthly') as any,
+        nextRenewalDate: formatDateString(row.NextRenewalDate ?? row.nextRenewalDate),
+        category: String(row.Category ?? row.category ?? ''),
+        accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
+        autoRenew: row.autoRenew === true || row.autoRenew === 'true',
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
+
+    case 'taxSavings': {
+      const res: TaxSavingItem = {
+        id: String(row.id || ''),
+        name: String(row.Name ?? row.name ?? ''),
+        section: (row.Section ?? row.section ?? '80C') as any,
+        amount: parseNumber(row.Amount ?? row.amount, 0),
+        date: formatDateString(row.Date ?? row.date),
+        financialYear: String(row.financialYear || '2026-2027'),
+        notes: String(row.Notes ?? row.notes ?? ''),
+      };
+      return res as unknown as T;
+    }
+
+    case 'budgetCategories': {
+      const res: BudgetCategory = {
+        id: String(row.id || `b-${Date.now()}`),
+        category: String(row.Category ?? row.category ?? ''),
+        monthlyLimit: parseNumber(row.MonthlyBudget ?? row.monthlyBudget ?? row.monthlyLimit, 0),
+        color: row.color,
+      };
+      return res as unknown as T;
+    }
+
+    case 'netWorthSnapshots': {
+      const dateStr = formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10);
+      let assetBreakdown = { liquidAccounts: 0, investments: 0, cash: 0 };
+      let liabilityBreakdown = { emiPrincipal: 0, creditCards: 0 };
+
+      if (typeof row.assetBreakdown === 'string') {
+        try {
+          assetBreakdown = JSON.parse(row.assetBreakdown);
+        } catch {
+          // ignore
+        }
+      } else if (row.assetBreakdown && typeof row.assetBreakdown === 'object') {
+        assetBreakdown = row.assetBreakdown;
       }
-    }
-    if (typeof row.liabilityBreakdown === 'string') {
-      try {
-        row.liabilityBreakdown = JSON.parse(row.liabilityBreakdown);
-      } catch {
-        row.liabilityBreakdown = { emiPrincipal: 0, creditCards: 0 };
-      }
-    }
-  }
 
-  return row as T;
+      if (typeof row.liabilityBreakdown === 'string') {
+        try {
+          liabilityBreakdown = JSON.parse(row.liabilityBreakdown);
+        } catch {
+          // ignore
+        }
+      } else if (row.liabilityBreakdown && typeof row.liabilityBreakdown === 'object') {
+        liabilityBreakdown = row.liabilityBreakdown;
+      }
+
+      const res: NetWorthSnapshot = {
+        id: String(row.id || ''),
+        date: dateStr,
+        month: dateStr.slice(0, 7),
+        totalAssets: parseNumber(row.TotalAssets ?? row.totalAssets, 0),
+        totalLiabilities: parseNumber(row.TotalLiabilities ?? row.totalLiabilities, 0),
+        netWorth: parseNumber(row.NetWorth ?? row.netWorth, 0),
+        assetBreakdown,
+        liabilityBreakdown,
+      };
+      return res as unknown as T;
+    }
+
+    default:
+      return row as T;
+  }
 }
 
 /**
  * Calls Google Apps Script Web App: GET ?sheet=SheetName
- * Includes a 4.5s AbortController timeout to guarantee UI responsiveness
+ * Includes a 5s AbortController timeout to guarantee UI responsiveness
  */
-export async function apiGet<T>(sheetName: string, timeoutMs: number = 4500): Promise<T[]> {
+export async function apiGet<T>(sheetName: string, timeoutMs: number = 5000): Promise<T[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
@@ -276,23 +622,28 @@ function serializeRow(row: any): any {
 // -------------------------------------------------------------
 
 export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
+  if (storeName === 'settings') {
+    const cached = getCachedStore<T>('settings');
+    return cached || [];
+  }
+
   const sheetName = SHEET_NAMES[storeName] || storeName;
 
   try {
     const rawRows = await apiGet<any>(sheetName);
-    // Eliminate blank/empty rows from Google Sheets
+    // Eliminate blank/empty/corrupted rows from Google Sheets
     const nonEmpty = rawRows.filter((r) => !isRowEmpty(r));
-    const normalized = nonEmpty.map((r) => normalizeRow<T>(storeName, r));
+    const entities = nonEmpty.map((r) => mapSheetRowToEntity<T>(storeName, r));
 
     // Provide default categories if Budget vs Actual has no rows yet
-    if (storeName === 'budgetCategories' && normalized.length === 0) {
+    if (storeName === 'budgetCategories' && entities.length === 0) {
       const cached = getCachedStore<T>(storeName);
       if (cached && cached.length > 0) return cached;
       return DEFAULT_BUDGET_CATEGORIES as unknown as T[];
     }
 
-    setCachedStore(storeName, normalized);
-    return normalized;
+    setCachedStore(storeName, entities);
+    return entities;
   } catch (err) {
     console.warn(`[GAS] Error fetching ${sheetName}, checking local cache:`, err);
     const cached = getCachedStore<T>(storeName);
@@ -306,34 +657,53 @@ export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
   }
 }
 
-export async function putItemInStore<T>(storeName: StoreName, item: T): Promise<void> {
+export async function putItemInStore<T>(storeName: StoreName, item: T): Promise<T> {
   const sheetName = SHEET_NAMES[storeName] || storeName;
   const anyItem = item as any;
   const id = anyItem.id || anyItem.key;
 
   // Clean payload if budgetCategories to prevent cross-sheet formula pollution
-  let payloadRow = item;
+  let entityToSave = { ...anyItem };
   if (storeName === 'budgetCategories') {
-    payloadRow = {
+    entityToSave = {
       id: anyItem.id || `b-${Date.now()}`,
       category: anyItem.category,
       monthlyLimit: Number(anyItem.monthlyLimit) || 0,
     } as any;
   }
 
-  // Optimistically update local cache
+  // Optimistically update local cache with clean frontend entity
   const cached = getCachedStore<any>(storeName) || [];
   const index = cached.findIndex((i) => (i.id && i.id === id) || (i.key && i.key === id));
   if (index >= 0) {
-    cached[index] = payloadRow;
+    cached[index] = entityToSave;
   } else {
-    cached.push(payloadRow);
+    cached.push(entityToSave);
   }
   setCachedStore(storeName, cached);
 
-  // Send mutation to Google Apps Script
+  if (storeName === 'settings') {
+    return entityToSave as T;
+  }
+
+  // Explicitly map frontend entity to exact Google Sheet header names
+  const sheetRow = mapEntityToSheetRow(storeName, entityToSave);
   const action = index >= 0 ? 'update' : 'create';
-  await apiMutate(sheetName, action, payloadRow, id);
+  const res = await apiMutate(sheetName, action, sheetRow, id);
+
+  // If GAS returned a generated UUID for create, update local cache and entity ID
+  if (action === 'create' && res && res.id && res.id !== id) {
+    const assignedId = String(res.id);
+    entityToSave.id = assignedId;
+    const finalCached = getCachedStore<any>(storeName) || [];
+    const itemIdx = finalCached.findIndex((i) => i.id === id);
+    if (itemIdx >= 0) {
+      finalCached[itemIdx] = { ...finalCached[itemIdx], id: assignedId };
+      setCachedStore(storeName, finalCached);
+    }
+  }
+
+  return entityToSave as T;
 }
 
 export async function putItemsInStore<T>(storeName: StoreName, items: T[]): Promise<void> {
@@ -343,11 +713,16 @@ export async function putItemsInStore<T>(storeName: StoreName, items: T[]): Prom
   // Update local cache
   setCachedStore(storeName, items);
 
-  // Insert items to Google Apps Script
+  if (storeName === 'settings') {
+    return;
+  }
+
+  // Insert items to Google Apps Script mapped to exact sheet headers
   for (const item of items) {
     const anyItem = item as any;
     const id = anyItem.id || anyItem.key;
-    await apiMutate(sheetName, 'create', item, id);
+    const sheetRow = mapEntityToSheetRow(storeName, item);
+    await apiMutate(sheetName, 'create', sheetRow, id);
   }
 }
 
@@ -359,12 +734,20 @@ export async function deleteItemFromStore(storeName: StoreName, id: string): Pro
   const filtered = cached.filter((i) => (i.id ? i.id !== id : i.key !== id));
   setCachedStore(storeName, filtered);
 
+  if (storeName === 'settings') {
+    return;
+  }
+
   await apiMutate(sheetName, 'delete', undefined, id);
 }
 
 export async function clearStore(storeName: StoreName): Promise<void> {
   const sheetName = SHEET_NAMES[storeName] || storeName;
   setCachedStore(storeName, []);
+
+  if (storeName === 'settings') {
+    return;
+  }
 
   // Fetch all existing rows and delete them
   try {
@@ -396,18 +779,18 @@ export async function exportDatabase(): Promise<AppDatabaseSchema> {
     netWorthSnapshots,
     rawSettings,
   ] = await Promise.all([
-    getAllFromStore<any>('accounts'),
-    getAllFromStore<any>('incomes'),
-    getAllFromStore<any>('expenses'),
-    getAllFromStore<any>('emis'),
-    getAllFromStore<any>('transfers'),
-    getAllFromStore<any>('creditCards'),
-    getAllFromStore<any>('creditCardBills'),
-    getAllFromStore<any>('savingsGoals'),
-    getAllFromStore<any>('recurringBills'),
-    getAllFromStore<any>('taxSavings'),
-    getAllFromStore<any>('budgetCategories'),
-    getAllFromStore<any>('netWorthSnapshots'),
+    getAllFromStore<Account>('accounts'),
+    getAllFromStore<Income>('incomes'),
+    getAllFromStore<Expense>('expenses'),
+    getAllFromStore<EmiLoan>('emis'),
+    getAllFromStore<AccountTransfer>('transfers'),
+    getAllFromStore<CreditCard>('creditCards'),
+    getAllFromStore<CreditCardBill>('creditCardBills'),
+    getAllFromStore<SavingsGoal>('savingsGoals'),
+    getAllFromStore<RecurringBill>('recurringBills'),
+    getAllFromStore<TaxSavingItem>('taxSavings'),
+    getAllFromStore<BudgetCategory>('budgetCategories'),
+    getAllFromStore<NetWorthSnapshot>('netWorthSnapshots'),
     getAllFromStore<any>('settings'),
   ]);
 

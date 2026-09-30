@@ -143,43 +143,48 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const currentMonthInitial = new Date().toISOString().slice(0, 7);
   const sample = useMemo(() => getSampleDatabase(), []);
 
+  const getInitialStore = <T,>(store: db.StoreName, fallback: T[]): T[] => {
+    const cached = db.getCachedStore<T>(store);
+    return cached && Array.isArray(cached) && cached.length > 0 ? cached : fallback;
+  };
+
   // Hydrate immediately from local cache or fallback to sample data
   // Guarantees 0ms initial paint — zero blank or black screen!
-  const [accounts, setAccounts] = useState<Account[]>(
-    () => db.getCachedStore<Account>('accounts') || sample.accounts
+  const [accounts, setAccounts] = useState<Account[]>(() =>
+    getInitialStore<Account>('accounts', sample.accounts)
   );
-  const [incomes, setIncomes] = useState<Income[]>(
-    () => db.getCachedStore<Income>('incomes') || sample.incomes
+  const [incomes, setIncomes] = useState<Income[]>(() =>
+    getInitialStore<Income>('incomes', sample.incomes)
   );
-  const [expenses, setExpenses] = useState<Expense[]>(
-    () => db.getCachedStore<Expense>('expenses') || sample.expenses
+  const [expenses, setExpenses] = useState<Expense[]>(() =>
+    getInitialStore<Expense>('expenses', sample.expenses)
   );
-  const [emis, setEmis] = useState<EmiLoan[]>(
-    () => db.getCachedStore<EmiLoan>('emis') || sample.emis
+  const [emis, setEmis] = useState<EmiLoan[]>(() =>
+    getInitialStore<EmiLoan>('emis', sample.emis)
   );
-  const [transfers, setTransfers] = useState<AccountTransfer[]>(
-    () => db.getCachedStore<AccountTransfer>('transfers') || sample.transfers
+  const [transfers, setTransfers] = useState<AccountTransfer[]>(() =>
+    getInitialStore<AccountTransfer>('transfers', sample.transfers)
   );
-  const [creditCards, setCreditCards] = useState<CreditCard[]>(
-    () => db.getCachedStore<CreditCard>('creditCards') || sample.creditCards
+  const [creditCards, setCreditCards] = useState<CreditCard[]>(() =>
+    getInitialStore<CreditCard>('creditCards', sample.creditCards)
   );
-  const [creditCardBills, setCreditCardBills] = useState<CreditCardBill[]>(
-    () => db.getCachedStore<CreditCardBill>('creditCardBills') || sample.creditCardBills
+  const [creditCardBills, setCreditCardBills] = useState<CreditCardBill[]>(() =>
+    getInitialStore<CreditCardBill>('creditCardBills', sample.creditCardBills)
   );
-  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(
-    () => db.getCachedStore<SavingsGoal>('savingsGoals') || sample.savingsGoals
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() =>
+    getInitialStore<SavingsGoal>('savingsGoals', sample.savingsGoals)
   );
-  const [recurringBills, setRecurringBills] = useState<RecurringBill[]>(
-    () => db.getCachedStore<RecurringBill>('recurringBills') || sample.recurringBills
+  const [recurringBills, setRecurringBills] = useState<RecurringBill[]>(() =>
+    getInitialStore<RecurringBill>('recurringBills', sample.recurringBills)
   );
-  const [taxSavings, setTaxSavings] = useState<TaxSavingItem[]>(
-    () => db.getCachedStore<TaxSavingItem>('taxSavings') || sample.taxSavings
+  const [taxSavings, setTaxSavings] = useState<TaxSavingItem[]>(() =>
+    getInitialStore<TaxSavingItem>('taxSavings', sample.taxSavings)
   );
-  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(
-    () => db.getCachedStore<BudgetCategory>('budgetCategories') || db.DEFAULT_BUDGET_CATEGORIES
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(() =>
+    getInitialStore<BudgetCategory>('budgetCategories', db.DEFAULT_BUDGET_CATEGORIES)
   );
-  const [netWorthSnapshots, setNetWorthSnapshots] = useState<NetWorthSnapshot[]>(
-    () => db.getCachedStore<NetWorthSnapshot>('netWorthSnapshots') || sample.netWorthSnapshots
+  const [netWorthSnapshots, setNetWorthSnapshots] = useState<NetWorthSnapshot[]>(() =>
+    getInitialStore<NetWorthSnapshot>('netWorthSnapshots', sample.netWorthSnapshots)
   );
 
   const [settings, setSettings] = useState<UserSettings>(() => {
@@ -423,13 +428,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Accounts
   const addAccount = async (data: Omit<Account, 'id' | 'createdAt'> & { id?: string }): Promise<Account> => {
-    const newAcc: Account = {
+    const tempId = data.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newAcc: Account = {
       ...data,
-      id: data.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
       createdAt: new Date().toISOString().slice(0, 10),
     };
     setAccounts((prev) => [...prev, newAcc]);
-    await runMutationWithSync(() => db.putItemInStore('accounts', newAcc));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('accounts', newAcc);
+      if (saved && saved.id && saved.id !== tempId) {
+        newAcc = saved;
+        setAccounts((prev) => prev.map((a) => (a.id === tempId ? saved : a)));
+      }
+    });
     return newAcc;
   };
 
@@ -445,12 +457,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Income
   const addIncome = async (data: Omit<Income, 'id'>) => {
-    const newInc: Income = {
+    const tempId = `inc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newInc: Income = {
       ...data,
-      id: `inc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setIncomes((prev) => [newInc, ...prev]);
-    await runMutationWithSync(() => db.putItemInStore('incomes', newInc));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('incomes', newInc);
+      if (saved && saved.id && saved.id !== tempId) {
+        newInc = saved;
+        setIncomes((prev) => prev.map((i) => (i.id === tempId ? saved : i)));
+      }
+    });
   };
 
   const updateIncome = async (income: Income) => {
@@ -477,12 +496,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Expenses
   const addExpense = async (data: Omit<Expense, 'id'>) => {
-    const newExp: Expense = {
+    const tempId = `exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newExp: Expense = {
       ...data,
-      id: `exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setExpenses((prev) => [newExp, ...prev]);
-    await runMutationWithSync(() => db.putItemInStore('expenses', newExp));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('expenses', newExp);
+      if (saved && saved.id && saved.id !== tempId) {
+        newExp = saved;
+        setExpenses((prev) => prev.map((e) => (e.id === tempId ? saved : e)));
+      }
+    });
   };
 
   const updateExpense = async (expense: Expense) => {
@@ -509,12 +535,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // EMIs
   const addEmi = async (data: Omit<EmiLoan, 'id'>) => {
-    const newEmi: EmiLoan = {
+    const tempId = `emi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newEmi: EmiLoan = {
       ...data,
-      id: `emi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setEmis((prev) => [...prev, newEmi]);
-    await runMutationWithSync(() => db.putItemInStore('emis', newEmi));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('emis', newEmi);
+      if (saved && saved.id && saved.id !== tempId) {
+        newEmi = saved;
+        setEmis((prev) => prev.map((e) => (e.id === tempId ? saved : e)));
+      }
+    });
   };
 
   const updateEmi = async (emi: EmiLoan) => {
@@ -539,12 +572,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Transfers
   const addTransfer = async (data: Omit<AccountTransfer, 'id'>) => {
-    const newTr: AccountTransfer = {
+    const tempId = `tr-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newTr: AccountTransfer = {
       ...data,
-      id: `tr-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setTransfers((prev) => [newTr, ...prev]);
-    await runMutationWithSync(() => db.putItemInStore('transfers', newTr));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('transfers', newTr);
+      if (saved && saved.id && saved.id !== tempId) {
+        newTr = saved;
+        setTransfers((prev) => prev.map((t) => (t.id === tempId ? saved : t)));
+      }
+    });
   };
 
   const updateTransfer = async (transfer: AccountTransfer) => {
@@ -559,12 +599,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Credit Cards
   const addCreditCard = async (data: Omit<CreditCard, 'id'>) => {
-    const newCard: CreditCard = {
+    const tempId = `cc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newCard: CreditCard = {
       ...data,
-      id: `cc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setCreditCards((prev) => [...prev, newCard]);
-    await runMutationWithSync(() => db.putItemInStore('creditCards', newCard));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('creditCards', newCard);
+      if (saved && saved.id && saved.id !== tempId) {
+        newCard = saved;
+        setCreditCards((prev) => prev.map((c) => (c.id === tempId ? saved : c)));
+      }
+    });
   };
 
   const updateCreditCard = async (card: CreditCard) => {
@@ -578,12 +625,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const addCreditCardBill = async (data: Omit<CreditCardBill, 'id'>) => {
-    const newBill: CreditCardBill = {
+    const tempId = `ccb-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newBill: CreditCardBill = {
       ...data,
-      id: `ccb-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setCreditCardBills((prev) => [newBill, ...prev]);
-    await runMutationWithSync(() => db.putItemInStore('creditCardBills', newBill));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('creditCardBills', newBill);
+      if (saved && saved.id && saved.id !== tempId) {
+        newBill = saved;
+        setCreditCardBills((prev) => prev.map((b) => (b.id === tempId ? saved : b)));
+      }
+    });
   };
 
   const payCreditCardBill = async (billId: string, fromBankAccountId: string, amount: number) => {
@@ -615,12 +669,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Savings Goals
   const addSavingsGoal = async (data: Omit<SavingsGoal, 'id'>) => {
-    const newGoal: SavingsGoal = {
+    const tempId = `goal-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newGoal: SavingsGoal = {
       ...data,
-      id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setSavingsGoals((prev) => [...prev, newGoal]);
-    await runMutationWithSync(() => db.putItemInStore('savingsGoals', newGoal));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('savingsGoals', newGoal);
+      if (saved && saved.id && saved.id !== tempId) {
+        newGoal = saved;
+        setSavingsGoals((prev) => prev.map((g) => (g.id === tempId ? saved : g)));
+      }
+    });
   };
 
   const updateSavingsGoal = async (goal: SavingsGoal) => {
@@ -660,12 +721,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Recurring Bills
   const addRecurringBill = async (data: Omit<RecurringBill, 'id'>) => {
-    const newBill: RecurringBill = {
+    const tempId = `rec-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newBill: RecurringBill = {
       ...data,
-      id: `rec-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setRecurringBills((prev) => [...prev, newBill]);
-    await runMutationWithSync(() => db.putItemInStore('recurringBills', newBill));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('recurringBills', newBill);
+      if (saved && saved.id && saved.id !== tempId) {
+        newBill = saved;
+        setRecurringBills((prev) => prev.map((b) => (b.id === tempId ? saved : b)));
+      }
+    });
   };
 
   const updateRecurringBill = async (bill: RecurringBill) => {
@@ -697,12 +765,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Tax Savings
   const addTaxSaving = async (data: Omit<TaxSavingItem, 'id'>) => {
-    const newItem: TaxSavingItem = {
+    const tempId = `tax-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    let newItem: TaxSavingItem = {
       ...data,
-      id: `tax-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: tempId,
     };
     setTaxSavings((prev) => [...prev, newItem]);
-    await runMutationWithSync(() => db.putItemInStore('taxSavings', newItem));
+    await runMutationWithSync(async () => {
+      const saved = await db.putItemInStore('taxSavings', newItem);
+      if (saved && saved.id && saved.id !== tempId) {
+        newItem = saved;
+        setTaxSavings((prev) => prev.map((t) => (t.id === tempId ? saved : t)));
+      }
+    });
   };
 
   const updateTaxSaving = async (item: TaxSavingItem) => {
