@@ -28,7 +28,19 @@ interface EmiTrackerPageProps {
 }
 
 export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) => {
-  const { emis, accounts, updateEmi, deleteEmi, markEmiPaid, settings, isStoreLoading } = useFinance();
+  const {
+    emis,
+    emiPayments,
+    monthlyEmiInstances,
+    accounts,
+    selectedMonth,
+    updateEmi,
+    deleteEmi,
+    markEmiPaid,
+    markEmiUnpaid,
+    settings,
+    isStoreLoading,
+  } = useFinance();
 
   const [payoffStrategy, setPayoffStrategy] = useState<'Avalanche' | 'Snowball'>('Avalanche');
   const [extraPayment, setExtraPayment] = useState<string>('0');
@@ -36,10 +48,10 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  // Top totals
-  const totalMonthlyEmi = emis.reduce((sum, e) => sum + e.monthlyAmount, 0);
+  // Top totals for selected month
+  const totalMonthlyEmi = monthlyEmiInstances.reduce((sum, inst) => sum + inst.amount, 0);
   const totalPrincipal = emis.reduce((sum, e) => sum + e.outstandingPrincipal, 0);
-  const activeLoansCount = emis.filter((e) => e.outstandingPrincipal > 0).length;
+  const activeLoansCount = monthlyEmiInstances.length;
 
   const accountMap = new Map<string, string>();
   accounts.forEach((a) => accountMap.set(a.id, a.name));
@@ -108,7 +120,7 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <GlassCard glow="purple" className="p-4 border-purple-500/30 bg-purple-950/20">
           <div className="text-xs font-semibold uppercase tracking-wider text-purple-300">
-            Total Monthly EMI Obligation
+            Total Monthly EMI Obligation ({selectedMonth})
           </div>
           <div className="text-2xl font-bold text-white mt-1">
             {settings.currency}
@@ -116,7 +128,7 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
             <span className="text-xs text-slate-400 font-normal"> / month</span>
           </div>
           <div className="text-[11px] text-purple-300 mt-0.5">
-            {activeLoansCount} active {activeLoansCount === 1 ? 'loan' : 'loans'} tracked
+            {activeLoansCount} active {activeLoansCount === 1 ? 'loan' : 'loans'} in {selectedMonth}
           </div>
         </GlassCard>
 
@@ -157,13 +169,22 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
       {/* Loans List */}
       <GlassCard className="p-0 overflow-hidden">
         <div className="p-4 border-b border-white/10 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white">Active Loan Portfolios</h3>
-          <span className="text-xs text-slate-400">{emis.length} loans recorded</span>
+          <div>
+            <h3 className="text-sm font-bold text-white">
+              Active Loans for Month: <span className="text-purple-300 font-mono">{selectedMonth}</span>
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Each active loan appears every month with independent Paid / Pending status until its final instalment.
+            </p>
+          </div>
+          <span className="text-xs text-purple-300 font-medium">
+            {monthlyEmiInstances.length} {monthlyEmiInstances.length === 1 ? 'obligation' : 'obligations'} this month
+          </span>
         </div>
 
-        {emis.length === 0 ? (
+        {monthlyEmiInstances.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">
-            No EMI loans added yet. Click &quot;Add Loan&quot; to begin debt payoff planning.
+            No active EMI loans for {selectedMonth}. Loans appear from their Start Date until their final instalment.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -172,45 +193,66 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
                 <tr className="border-b border-white/10 bg-slate-900/50 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                   <th className="py-3 px-4">Loan & Lender</th>
                   <th className="py-3 px-4">Monthly EMI</th>
+                  <th className="py-3 px-4">Instalments Progress</th>
                   <th className="py-3 px-4">Outstanding Principal</th>
                   <th className="py-3 px-4">Interest Rate</th>
                   <th className="py-3 px-4">Due Date</th>
                   <th className="py-3 px-4">Account Debited</th>
-                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Status ({selectedMonth})</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {emis.map((emi) => {
-                  const isPaid = emi.status === 'Paid';
-                  const isOverdue =
-                    emi.status === 'Overdue' ||
-                    (emi.status === 'Pending' && emi.dueDate && emi.dueDate < todayStr);
-                  const accountName = accountMap.get(emi.accountId) || 'Unknown Account';
+                {monthlyEmiInstances.map((inst) => {
+                  const isPaid = inst.status === 'Paid';
+                  const isOverdue = inst.status === 'Overdue';
+                  const accountName = accountMap.get(inst.accountId) || 'Unknown Account';
 
                   return (
-                    <tr key={emi.id} className="hover:bg-white/[0.03] transition-colors group">
+                    <tr key={inst.id} className="hover:bg-white/[0.03] transition-colors group">
                       <td className="py-3.5 px-4 font-medium text-white">
-                        <div className="font-bold">{emi.loanName}</div>
-                        <div className="text-[11px] text-purple-300">{emi.lender}</div>
+                        <div className="font-bold">{inst.loan.loanName}</div>
+                        <div className="text-[11px] text-purple-300">{inst.loan.lender}</div>
                       </td>
 
                       <td className="py-3.5 px-4 font-mono font-bold text-white whitespace-nowrap">
                         {settings.currency}
-                        {emi.monthlyAmount.toLocaleString('en-IN')}
+                        {inst.amount.toLocaleString('en-IN')}
+                      </td>
+
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        {inst.totalInstallments ? (
+                          <div>
+                            <span className="font-mono font-bold text-purple-300">
+                              #{inst.installmentNumber} of {inst.totalInstallments}
+                            </span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {inst.installmentsPaid} paid • {inst.installmentsRemaining} remaining
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="text-[11px] font-semibold text-slate-300">
+                              Ongoing Loan
+                            </span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Instalment #{inst.installmentNumber}
+                            </div>
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4 font-mono font-semibold text-rose-300 whitespace-nowrap">
                         {settings.currency}
-                        {emi.outstandingPrincipal.toLocaleString('en-IN')}
+                        {inst.loan.outstandingPrincipal.toLocaleString('en-IN')}
                       </td>
 
                       <td className="py-3.5 px-4 font-mono font-semibold text-amber-300 whitespace-nowrap">
-                        {emi.interestRate}% p.a.
+                        {inst.loan.interestRate}% p.a.
                       </td>
 
                       <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
-                        {emi.dueDate || 'Monthly'}
+                        {inst.dueDate}
                       </td>
 
                       <td className="py-3.5 px-4 text-purple-300 whitespace-nowrap">
@@ -238,23 +280,34 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
 
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
-                          {!isPaid && (
+                          {!isPaid ? (
                             <button
-                              onClick={() => markEmiPaid(emi.id)}
+                              onClick={() => markEmiPaid(inst.loanId, selectedMonth)}
                               className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[10px] font-semibold transition-colors flex items-center gap-1"
+                              title="Mark Paid for this month"
                             >
                               <CheckCircle2 className="w-3 h-3" /> Mark Paid
                             </button>
+                          ) : (
+                            <button
+                              onClick={() => markEmiUnpaid(inst.loanId, selectedMonth)}
+                              className="px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-white border border-white/10 text-[10px] font-medium transition-colors"
+                              title="Undo Paid status for this month"
+                            >
+                              Mark Pending
+                            </button>
                           )}
                           <button
-                            onClick={() => setEditingEmi(emi)}
+                            onClick={() => setEditingEmi(inst.loan)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                            title="Edit Loan Definition"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDelete(emi.id, emi.loanName)}
+                            onClick={() => handleDelete(inst.loanId, inst.loan.loanName)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            title="Delete Loan"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -425,23 +478,40 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
         <GlassModal
           isOpen={true}
           onClose={() => setEditingEmi(null)}
-          title="Edit Loan Details"
-          subtitle="Update interest rate or outstanding principal balance"
+          title="Edit Loan Definition"
+          subtitle="Update interest rate, tenure, start date, or principal balance"
         >
           <form onSubmit={handleEditSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Loan Name
-              </label>
-              <input
-                type="text"
-                required
-                value={editingEmi.loanName}
-                onChange={(e) =>
-                  setEditingEmi({ ...editingEmi, loanName: e.target.value })
-                }
-                className="glass-input w-full mt-1 text-sm"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Loan Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingEmi.loanName}
+                  onChange={(e) =>
+                    setEditingEmi({ ...editingEmi, loanName: e.target.value })
+                  }
+                  className="glass-input w-full mt-1 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Lender / Bank
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingEmi.lender}
+                  onChange={(e) =>
+                    setEditingEmi({ ...editingEmi, lender: e.target.value })
+                  }
+                  className="glass-input w-full mt-1 text-sm"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -505,12 +575,78 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
               </div>
 
               <GlassDatePicker
-                label="Due Date"
+                label="Monthly Due Date / Day"
                 value={editingEmi.dueDate}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setEditingEmi({ ...editingEmi, dueDate: e.target.value })
                 }
               />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <GlassDatePicker
+                label="Start Date (1st Instalment)"
+                value={editingEmi.startDate || editingEmi.dueDate}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setEditingEmi({ ...editingEmi, startDate: e.target.value })
+                }
+              />
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Total Instalments (Blank = Ongoing)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="e.g. 24, 60, 240 (optional)"
+                  value={editingEmi.totalInstallments ?? ''}
+                  onChange={(e) =>
+                    setEditingEmi({
+                      ...editingEmi,
+                      totalInstallments: e.target.value ? parseInt(e.target.value, 10) : null,
+                    })
+                  }
+                  className="glass-input w-full mt-1 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Debit Account
+                </label>
+                <select
+                  value={editingEmi.accountId}
+                  onChange={(e) =>
+                    setEditingEmi({ ...editingEmi, accountId: e.target.value })
+                  }
+                  className="glass-input w-full mt-1 text-sm bg-slate-900"
+                >
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.type.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Notes / Reference
+                </label>
+                <input
+                  type="text"
+                  placeholder="Optional notes"
+                  value={editingEmi.notes || ''}
+                  onChange={(e) =>
+                    setEditingEmi({ ...editingEmi, notes: e.target.value })
+                  }
+                  className="glass-input w-full mt-1 text-sm"
+                />
+              </div>
             </div>
 
             <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/10">

@@ -23,6 +23,7 @@ export const CashflowRunwayPage: React.FC = () => {
     incomes,
     expenses,
     emis,
+    emiPayments,
     settings,
     isPageLoading,
   } = useFinance();
@@ -37,7 +38,8 @@ export const CashflowRunwayPage: React.FC = () => {
       incomes,
       expenses,
       emis,
-      todayStr
+      todayStr,
+      emiPayments
     );
   }, [
     dashboardMetrics.netBalanceInHand,
@@ -46,6 +48,7 @@ export const CashflowRunwayPage: React.FC = () => {
     expenses,
     emis,
     todayStr,
+    emiPayments,
   ]);
 
   if (isPageLoading('runway') && incomes.length === 0 && expenses.length === 0) {

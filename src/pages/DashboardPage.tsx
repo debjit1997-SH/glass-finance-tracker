@@ -5,6 +5,7 @@ import { StatCard } from '../components/ui/StatCard';
 import { DueSoonBanner } from '../components/layout/DueSoonBanner';
 import { GaugeChart } from '../components/ui/GaugeChart';
 import { StatCardSkeleton, ChartSkeleton } from '../components/ui/GlassSkeleton';
+import { getMonthlyEmiInstances } from '../services/calculations';
 import {
   Wallet,
   ArrowDownLeft,
@@ -57,6 +58,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     incomes,
     expenses,
     emis,
+    emiPayments,
   } = useFinance();
 
   const [isEditingTarget, setIsEditingTarget] = useState(false);
@@ -104,10 +106,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         .filter((exp) => exp.date.startsWith(key))
         .reduce((s, exp) => s + (exp.status === 'Paid' ? exp.actualAmount || exp.expectedAmount : exp.expectedAmount), 0);
 
-      // EMI in month
-      const emiTotal = emis
-        .filter((emi) => !emi.dueDate || emi.dueDate.startsWith(key))
-        .reduce((s, emi) => s + emi.monthlyAmount, 0);
+      // EMI in month using active monthly instances
+      const monthlyInstances = getMonthlyEmiInstances(emis, emiPayments, key);
+      const emiTotal = monthlyInstances.reduce((s, inst) => s + inst.amount, 0);
 
       const netSavings = incTotal - expTotal - emiTotal;
       const rate = incTotal > 0 ? (netSavings / incTotal) * 100 : 0;
@@ -123,7 +124,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     }
 
     return result;
-  }, [selectedMonth, incomes, expenses, emis]);
+  }, [selectedMonth, incomes, expenses, emis, emiPayments]);
 
   const {
     openingBalance,

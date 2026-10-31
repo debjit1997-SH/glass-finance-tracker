@@ -226,6 +226,8 @@ export function getSampleDatabase(): AppDatabaseSchema {
         outstandingPrincipal: 3250000,
         interestRate: 8.5,
         dueDate: dayOfMonth(5),
+        startDate: dayOfMonth(5),
+        totalInstallments: 240,
         accountId: 'acc-hdfc-salary',
         status: 'Paid',
         notes: '20-year residential mortgage',
@@ -238,9 +240,24 @@ export function getSampleDatabase(): AppDatabaseSchema {
         outstandingPrincipal: 420000,
         interestRate: 9.4,
         dueDate: addDays(2), // Due in 2 days -> triggers Due Soon banner!
+        startDate: dayOfMonth(1),
+        totalInstallments: 60,
         accountId: 'acc-hdfc-salary',
         status: 'Pending',
         notes: '5-year auto vehicle loan',
+      },
+    ],
+    emiPayments: [
+      {
+        id: 'emip-1',
+        loanId: 'emi-1',
+        month: currentMonth,
+        dueDate: dayOfMonth(5),
+        amount: 28500,
+        status: 'Paid',
+        paidDate: dayOfMonth(5),
+        paidAmount: 28500,
+        accountId: 'acc-hdfc-salary',
       },
     ],
     transfers: [

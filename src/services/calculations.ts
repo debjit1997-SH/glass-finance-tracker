@@ -3,6 +3,8 @@ import {
   Income,
   Expense,
   EmiLoan,
+  EmiPayment,
+  MonthlyEmiInstance,
   AccountTransfer,
   CreditCard,
   SavingsGoal,
@@ -11,6 +13,123 @@ import {
   BudgetCategory,
   DueSoonItem,
 } from '../types/finance';
+
+/**
+ * Derives a specific month's due date (YYYY-MM-DD) from a loan's base DueDate or StartDate,
+ * preserving the day-of-month and clamping to valid days for shorter months (e.g. Feb).
+ */
+export function deriveDueDateForMonth(baseDateStr: string, monthStr: string): string {
+  const [yearStr, mStr] = monthStr.split('-');
+  const year = parseInt(yearStr, 10);
+  const m = parseInt(mStr, 10);
+  let day = 1;
+
+  if (baseDateStr) {
+    const clean = baseDateStr.split('T')[0];
+    const parts = clean.split('-');
+    if (parts.length >= 3) {
+      day = parseInt(parts[2], 10) || 1;
+    }
+  }
+
+  const daysInMonth = new Date(year, m, 0).getDate();
+  const clampedDay = Math.min(Math.max(day, 1), daysInMonth);
+  return `${year}-${String(m).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+}
+
+/**
+ * Returns active EMI monthly instances for any given month (YYYY-MM).
+ * - A loan is active if the month is on or after its start month and (if TotalInstallments is set) on or before its final installment.
+ * - Each instance takes Paid/PaidDate/PaidAmount from matching EMI Payments row if one exists.
+ * - Otherwise it is a virtual Pending (or Overdue once due date has passed).
+ * - Existing loans default StartDate to their DueDate.
+ */
+export function getMonthlyEmiInstances(
+  loans: EmiLoan[],
+  payments: EmiPayment[] = [],
+  monthStr: string,
+  todayStr: string = new Date().toISOString().slice(0, 10)
+): MonthlyEmiInstance[] {
+  const [currYear, currM] = monthStr.split('-').map(Number);
+  const instances: MonthlyEmiInstance[] = [];
+
+  for (const loan of loans) {
+    const startDate = loan.startDate || loan.dueDate || `${monthStr}-01`;
+    const startMonth = startDate.slice(0, 7);
+    const [startYear, startM] = startMonth.split('-').map(Number);
+
+    const diffMonths = (currYear - startYear) * 12 + (currM - startM);
+    if (diffMonths < 0) {
+      // Loan has not started yet in this month
+      continue;
+    }
+
+    const installmentNumber = diffMonths + 1;
+    const totalInstallments =
+      loan.totalInstallments !== undefined && loan.totalInstallments !== null && Number(loan.totalInstallments) > 0
+        ? Number(loan.totalInstallments)
+        : null;
+
+    if (totalInstallments !== null && installmentNumber > totalInstallments) {
+      // Loan has ended before this month
+      continue;
+    }
+
+    const derivedDueDate = deriveDueDateForMonth(loan.dueDate || startDate, monthStr);
+    const payment = payments.find((p) => p.loanId === loan.id && p.month === monthStr);
+
+    let status: EmiLoan['status'];
+    let paidDate: string | undefined;
+    let paidAmount: number | undefined;
+    let accountId = loan.accountId;
+    let amount = loan.monthlyAmount;
+    let paymentId: string | undefined;
+
+    if (payment) {
+      status = payment.status;
+      paidDate = payment.paidDate;
+      paidAmount = payment.paidAmount;
+      accountId = payment.accountId || loan.accountId;
+      amount = payment.amount ?? loan.monthlyAmount;
+      paymentId = payment.id;
+    } else {
+      // Legacy fallback: if existing loan was marked Paid in sheet and this is its start month
+      if (loan.status === 'Paid' && monthStr === startMonth) {
+        status = 'Paid';
+        paidDate = loan.dueDate;
+        paidAmount = loan.monthlyAmount;
+      } else {
+        status = derivedDueDate < todayStr ? 'Overdue' : 'Pending';
+      }
+    }
+
+    // Instalments paid across all months for this loan
+    const paidPaymentsCount = payments.filter((p) => p.loanId === loan.id && p.status === 'Paid').length;
+    const legacyPaidCount = loan.status === 'Paid' && !payments.some((p) => p.loanId === loan.id && p.month === startMonth) ? 1 : 0;
+    const installmentsPaid = paidPaymentsCount + legacyPaidCount;
+    const installmentsRemaining = totalInstallments !== null ? Math.max(0, totalInstallments - installmentsPaid) : undefined;
+
+    instances.push({
+      id: payment ? payment.id : `virtual-${loan.id}-${monthStr}`,
+      loanId: loan.id,
+      loan,
+      month: monthStr,
+      dueDate: payment?.dueDate || derivedDueDate,
+      amount,
+      status,
+      paidDate,
+      paidAmount,
+      accountId,
+      paymentId,
+      installmentNumber,
+      totalInstallments,
+      installmentsPaid,
+      installmentsRemaining,
+    });
+  }
+
+  return instances;
+}
 
 /**
  * Computes live balances for all accounts reactively.
@@ -24,7 +143,8 @@ export function calculateLiveBalances(
   incomes: Income[],
   expenses: Expense[],
   transfers: AccountTransfer[],
-  emis: EmiLoan[]
+  emis: EmiLoan[],
+  emiPayments: EmiPayment[] = []
 ): Map<string, number> {
   const balanceMap = new Map<string, number>();
 
@@ -58,22 +178,27 @@ export function calculateLiveBalances(
   expenses.forEach((exp) => {
     if (exp.status === 'Paid' && balanceMap.has(exp.accountId)) {
       const current = balanceMap.get(exp.accountId) || 0;
-      const account = accounts.find((a) => a.id === exp.accountId);
-      if (account?.type === 'credit_card') {
-        // Debiting a credit card increases its outstanding liability
-        balanceMap.set(exp.accountId, current - (exp.actualAmount || exp.expectedAmount));
-      } else {
-        // Regular account balance decreases
-        balanceMap.set(exp.accountId, current - (exp.actualAmount || exp.expectedAmount));
-      }
+      balanceMap.set(exp.accountId, current - (exp.actualAmount || exp.expectedAmount));
     }
   });
 
-  // EMI paid debited from accounts
+  // EMI paid debited from accounts (from actual recorded EMI Payments rows)
+  emiPayments.forEach((p) => {
+    if (p.status === 'Paid' && balanceMap.has(p.accountId)) {
+      const current = balanceMap.get(p.accountId) || 0;
+      balanceMap.set(p.accountId, current - (p.paidAmount || p.amount));
+    }
+  });
+
+  // Legacy fallback: for existing loans that were marked Paid before EMI Payments was introduced
   emis.forEach((emi) => {
-    if (emi.status === 'Paid' && balanceMap.has(emi.accountId)) {
-      const current = balanceMap.get(emi.accountId) || 0;
-      balanceMap.set(emi.accountId, current - emi.monthlyAmount);
+    if (emi.status === 'Paid') {
+      const startMonth = (emi.startDate || emi.dueDate || '').slice(0, 7);
+      const hasPayment = emiPayments.some((p) => p.loanId === emi.id && p.month === startMonth);
+      if (!hasPayment && balanceMap.has(emi.accountId)) {
+        const current = balanceMap.get(emi.accountId) || 0;
+        balanceMap.set(emi.accountId, current - emi.monthlyAmount);
+      }
     }
   });
 
@@ -90,7 +215,8 @@ export function calculateDashboardMetrics(
   incomes: Income[],
   expenses: Expense[],
   emis: EmiLoan[],
-  creditCards: CreditCard[]
+  creditCards: CreditCard[],
+  emiPayments: EmiPayment[] = []
 ) {
   // Total Income this month
   const monthlyIncomes = incomes.filter((i) => i.date.startsWith(month));
@@ -112,9 +238,9 @@ export function calculateDashboardMetrics(
     .filter((e) => e.status === 'Paid')
     .reduce((sum, e) => sum + (e.actualAmount || e.expectedAmount), 0);
 
-  // Total EMI this month
-  const monthlyEmis = emis.filter((e) => !e.dueDate || e.dueDate.startsWith(month));
-  const totalEmi = monthlyEmis.reduce((sum, e) => sum + e.monthlyAmount, 0);
+  // Total EMI this month using per-month active instances
+  const monthlyEmis = getMonthlyEmiInstances(emis, emiPayments, month);
+  const totalEmi = monthlyEmis.reduce((sum, e) => sum + e.amount, 0);
 
   // Opening Balance across liquid accounts (Bank + Cash + Wallet)
   const liquidAccounts = accounts.filter((a) => ['bank', 'cash', 'wallet'].includes(a.type));
@@ -158,7 +284,8 @@ export function getDueSoonItems(
   emis: EmiLoan[],
   recurringBills: RecurringBill[],
   accounts: Account[],
-  currentDateStr: string = new Date().toISOString().slice(0, 10)
+  currentDateStr: string = new Date().toISOString().slice(0, 10),
+  emiPayments: EmiPayment[] = []
 ): DueSoonItem[] {
   const today = new Date(currentDateStr);
   today.setHours(0, 0, 0, 0);
@@ -194,26 +321,35 @@ export function getDueSoonItems(
     }
   });
 
-  // EMIs pending
-  emis.forEach((emi) => {
-    if (emi.status === 'Pending' || emi.status === 'Overdue') {
-      const due = new Date(emi.dueDate);
+  // EMIs pending - checked against active monthly instances
+  const currentMonthStr = currentDateStr.slice(0, 7);
+  const [cYear, cMonth] = currentMonthStr.split('-').map(Number);
+  const nextMonthStr = cMonth === 12 ? `${cYear + 1}-01` : `${cYear}-${String(cMonth + 1).padStart(2, '0')}`;
+
+  const emiInstances = [
+    ...getMonthlyEmiInstances(emis, emiPayments, currentMonthStr, currentDateStr),
+    ...getMonthlyEmiInstances(emis, emiPayments, nextMonthStr, currentDateStr),
+  ];
+
+  emiInstances.forEach((inst) => {
+    if (inst.status === 'Pending' || inst.status === 'Overdue') {
+      const due = new Date(inst.dueDate);
       due.setHours(0, 0, 0, 0);
       const diffDays = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
       if (diffDays <= 3) {
         items.push({
-          id: emi.id,
+          id: inst.loanId,
           source: 'EMI',
-          title: `${emi.loanName} (${emi.lender})`,
-          amount: emi.monthlyAmount,
-          dueDate: emi.dueDate,
+          title: `${inst.loan.loanName} (${inst.loan.lender})`,
+          amount: inst.amount,
+          dueDate: inst.dueDate,
           daysRemaining: diffDays,
           isOverdue: diffDays < 0,
-          accountId: emi.accountId,
-          accountName: accountMap.get(emi.accountId) || 'Unknown Account',
+          accountId: inst.accountId,
+          accountName: accountMap.get(inst.accountId) || 'Unknown Account',
           category: 'EMI Loan',
-          rawItem: emi,
+          rawItem: inst.loan,
         });
       }
     }
@@ -474,7 +610,8 @@ export function calculateCashflowRunway(
   incomes: Income[],
   expenses: Expense[],
   emis: EmiLoan[],
-  todayStr: string = new Date().toISOString().slice(0, 10)
+  todayStr: string = new Date().toISOString().slice(0, 10),
+  emiPayments: EmiPayment[] = []
 ): {
   days: RunwayDay[];
   lowestBalance: number;
@@ -495,6 +632,8 @@ export function calculateCashflowRunway(
   let lowestDate = '';
   let negativeDaysCount = 0;
 
+  const monthlyEmis = getMonthlyEmiInstances(emis, emiPayments, currentMonth, todayStr);
+
   for (let d = 1; d <= daysInMonth; d++) {
     const dayStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dateObj = new Date(year, month - 1, d);
@@ -505,7 +644,7 @@ export function calculateCashflowRunway(
     // Events for this day
     const dayIncomes = incomes.filter((i) => i.date === dayStr);
     const dayExpenses = expenses.filter((e) => e.date === dayStr);
-    const dayEmis = emis.filter((e) => e.dueDate === dayStr);
+    const dayEmis = monthlyEmis.filter((e) => e.dueDate === dayStr);
 
     let incomingTotal = 0;
     let outgoingTotal = 0;
@@ -525,11 +664,11 @@ export function calculateCashflowRunway(
     });
 
     dayEmis.forEach((emi) => {
-      outgoingTotal += emi.monthlyAmount;
+      outgoingTotal += emi.amount;
       events.push({
         type: 'emi',
-        title: `EMI: ${emi.loanName}`,
-        amount: emi.monthlyAmount,
+        title: `EMI: ${emi.loan.loanName}`,
+        amount: emi.amount,
         status: emi.status,
       });
     });
@@ -548,7 +687,7 @@ export function calculateCashflowRunway(
           .reduce((s, e) => s + e.expectedAmount, 0) +
         dayEmis
           .filter((e) => e.status === 'Pending' || e.status === 'Overdue')
-          .reduce((s, e) => s + e.monthlyAmount, 0);
+          .reduce((s, e) => s + e.amount, 0);
 
       runningBalance = runningBalance + pendingIn - pendingOut;
 

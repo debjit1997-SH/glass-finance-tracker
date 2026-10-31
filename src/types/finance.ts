@@ -53,6 +53,38 @@ export interface EmiLoan {
   accountId: string; // Account Debited
   status: EmiStatus;
   notes?: string;
+  startDate?: string; // YYYY-MM-DD (first instalment date; defaults to dueDate)
+  totalInstallments?: number | null; // optional; null/undefined/blank means ongoing loan
+}
+
+export interface EmiPayment {
+  id: string;
+  loanId: string;
+  month: string; // YYYY-MM
+  dueDate: string; // YYYY-MM-DD
+  amount: number;
+  status: EmiStatus;
+  paidDate?: string; // YYYY-MM-DD
+  paidAmount?: number;
+  accountId: string; // Account Debited
+}
+
+export interface MonthlyEmiInstance {
+  id: string;
+  loanId: string;
+  loan: EmiLoan;
+  month: string; // YYYY-MM
+  dueDate: string; // YYYY-MM-DD
+  amount: number;
+  status: EmiStatus;
+  paidDate?: string;
+  paidAmount?: number;
+  accountId: string;
+  paymentId?: string;
+  installmentNumber?: number;
+  totalInstallments?: number | null;
+  installmentsPaid?: number;
+  installmentsRemaining?: number;
 }
 
 export interface AccountTransfer {
@@ -169,6 +201,7 @@ export interface AppDatabaseSchema {
   incomes: Income[];
   expenses: Expense[];
   emis: EmiLoan[];
+  emiPayments: EmiPayment[];
   transfers: AccountTransfer[];
   creditCards: CreditCard[];
   creditCardBills: CreditCardBill[];

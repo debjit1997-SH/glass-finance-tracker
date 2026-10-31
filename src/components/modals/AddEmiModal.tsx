@@ -20,6 +20,8 @@ export const AddEmiModal: React.FC<AddEmiModalProps> = ({ isOpen, onClose }) => 
   const [outstandingPrincipal, setOutstandingPrincipal] = useState('');
   const [interestRate, setInterestRate] = useState('');
   const [dueDate, setDueDate] = useState(todayStr);
+  const [startDate, setStartDate] = useState(todayStr);
+  const [totalInstallments, setTotalInstallments] = useState('');
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
   const [status, setStatus] = useState<EmiStatus>('Pending');
   const [notes, setNotes] = useState('');
@@ -50,6 +52,8 @@ export const AddEmiModal: React.FC<AddEmiModalProps> = ({ isOpen, onClose }) => 
         outstandingPrincipal: parseFloat(outstandingPrincipal),
         interestRate: parseFloat(interestRate),
         dueDate,
+        startDate: startDate || dueDate,
+        totalInstallments: totalInstallments ? parseInt(totalInstallments, 10) : null,
         accountId,
         status: finalStatus,
         notes,
@@ -60,6 +64,8 @@ export const AddEmiModal: React.FC<AddEmiModalProps> = ({ isOpen, onClose }) => 
       setMonthlyAmount('');
       setOutstandingPrincipal('');
       setInterestRate('');
+      setStartDate(todayStr);
+      setTotalInstallments('');
       setNotes('');
       onClose();
     } finally {
@@ -171,11 +177,36 @@ export const AddEmiModal: React.FC<AddEmiModalProps> = ({ isOpen, onClose }) => 
           </div>
 
           <GlassDatePicker
-            label="Monthly Due Date"
+            label="Monthly Due Date / Day"
             required
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
           />
+        </div>
+
+        {/* Start Date & Total Installments */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <GlassDatePicker
+            label="Start Date (1st Instalment)"
+            required
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+              Total Instalments (Blank = Ongoing)
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="e.g. 24, 60, 240 (optional)"
+              value={totalInstallments}
+              onChange={(e) => setTotalInstallments(e.target.value)}
+              className="glass-input w-full mt-1 text-sm"
+            />
+          </div>
         </div>
 
         {/* Debited Account & Status */}

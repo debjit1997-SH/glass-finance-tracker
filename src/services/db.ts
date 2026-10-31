@@ -3,6 +3,7 @@ import {
   Income,
   Expense,
   EmiLoan,
+  EmiPayment,
   AccountTransfer,
   CreditCard,
   CreditCardBill,
@@ -24,6 +25,7 @@ export const STORES = [
   'incomes',
   'expenses',
   'emis',
+  'emiPayments',
   'transfers',
   'creditCards',
   'creditCardBills',
@@ -42,6 +44,7 @@ export const SHEET_NAMES: Record<StoreName, string> = {
   incomes: 'Income Tracker',
   expenses: 'Expense Tracker',
   emis: 'EMI Tracker',
+  emiPayments: 'EMI Payments',
   transfers: 'Account Transfers',
   creditCards: 'Credit Card Tracker',
   creditCardBills: 'Credit Card Tracker',
@@ -205,6 +208,19 @@ function formatDateString(val: any): string {
   return s;
 }
 
+export function formatMonthString(val: any): string {
+  if (!val) return '';
+  const s = String(val).trim();
+  if (s.includes('T')) {
+    const formatted = formatDateString(s);
+    return formatted.slice(0, 7);
+  }
+  if (/^\d{4}-\d{2}/.test(s)) {
+    return s.slice(0, 7);
+  }
+  return s;
+}
+
 function parseNumber(val: any, fallback = 0): number {
   if (val === undefined || val === null || val === '') return fallback;
   const n = Number(val);
@@ -267,6 +283,21 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         Account: String(entity.accountId || ''),
         Status: String(entity.status || 'Pending'),
         Notes: String(entity.notes || ''),
+        StartDate: formatDateString(entity.startDate || entity.dueDate),
+        TotalInstallments: entity.totalInstallments ? parseNumber(entity.totalInstallments, 0) : '',
+      };
+
+    case 'emiPayments':
+      return {
+        id: String(entity.id || ''),
+        LoanId: String(entity.loanId || ''),
+        Month: String(entity.month || ''),
+        DueDate: formatDateString(entity.dueDate),
+        Amount: parseNumber(entity.amount, 0),
+        Status: String(entity.status || 'Pending'),
+        PaidDate: formatDateString(entity.paidDate),
+        PaidAmount: parseNumber(entity.paidAmount, 0),
+        Account: String(entity.accountId || ''),
       };
 
     case 'transfers':
@@ -412,6 +443,15 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
     }
 
     case 'emis': {
+      const dueDate = formatDateString(row.DueDate ?? row.dueDate);
+      const rawStart = row.StartDate ?? row.startDate;
+      const startDate = rawStart ? formatDateString(rawStart) : dueDate;
+      const rawTot = row.TotalInstallments ?? row.totalInstallments;
+      const totalInstallments =
+        rawTot !== undefined && rawTot !== null && rawTot !== ''
+          ? parseNumber(rawTot, 0)
+          : null;
+
       const res: EmiLoan = {
         id: String(row.id || ''),
         loanName: String(row.LoanName ?? row.loanName ?? ''),
@@ -419,10 +459,27 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         monthlyAmount: parseNumber(row.MonthlyAmount ?? row.monthlyAmount, 0),
         outstandingPrincipal: parseNumber(row.OutstandingPrincipal ?? row.outstandingPrincipal, 0),
         interestRate: parseNumber(row.InterestRate ?? row.interestRate, 0),
-        dueDate: formatDateString(row.DueDate ?? row.dueDate),
+        dueDate: dueDate,
         accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
         status: (row.Status ?? row.status ?? 'Pending') as any,
         notes: String(row.Notes ?? row.notes ?? ''),
+        startDate: startDate,
+        totalInstallments: totalInstallments && totalInstallments > 0 ? totalInstallments : null,
+      };
+      return res as unknown as T;
+    }
+
+    case 'emiPayments': {
+      const res: EmiPayment = {
+        id: String(row.id || ''),
+        loanId: String(row.LoanId ?? row.loanId ?? ''),
+        month: formatMonthString(row.Month ?? row.month),
+        dueDate: formatDateString(row.DueDate ?? row.dueDate),
+        amount: parseNumber(row.Amount ?? row.amount, 0),
+        status: (row.Status ?? row.status ?? 'Pending') as any,
+        paidDate: formatDateString(row.PaidDate ?? row.paidDate),
+        paidAmount: parseNumber(row.PaidAmount ?? row.paidAmount, 0),
+        accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
       };
       return res as unknown as T;
     }
@@ -474,7 +531,7 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
       const res: CreditCardBill = {
         id: String(row.id || ''),
         cardId: String(row.CardName ?? row.cardId ?? row.id ?? ''),
-        billingMonth: String(row.BillingMonth ?? row.billingMonth ?? ''),
+        billingMonth: formatMonthString(row.BillingMonth ?? row.billingMonth),
         statementDate: formatDateString(row.StatementDate ?? row.statementDate),
         billAmount: parseNumber(row.BillAmount ?? row.billAmount, 0),
         amountPaid: parseNumber(row.AmountPaid ?? row.amountPaid, 0),
@@ -624,8 +681,14 @@ export async function apiGet<T>(sheetName: string, timeoutMs: number = 15000): P
       if (Array.isArray(data)) {
         return data;
       }
-      if (data && typeof data === 'object' && Array.isArray((data as any).data)) {
-        return (data as any).data;
+      if (data && typeof data === 'object') {
+        if (Array.isArray((data as any).data)) {
+          return (data as any).data;
+        }
+        if ((data as any).error && String((data as any).error).includes('Sheet not found')) {
+          console.info(`[GAS] Sheet not yet created: ${sheetName}, using local storage`);
+          return [];
+        }
       }
       return [];
     } catch (err: any) {
@@ -682,7 +745,12 @@ export async function apiMutate(
   }
 
   try {
-    return text ? JSON.parse(text) : { success: true };
+    const parsed = text ? JSON.parse(text) : { success: true };
+    if (parsed && parsed.error && String(parsed.error).includes('Sheet not found')) {
+      console.warn(`[GAS] Sheet not yet created: ${sheetName}. Mutation saved to local cache only.`);
+      return { success: true, localOnly: true };
+    }
+    return parsed;
   } catch {
     return { success: true, raw: text };
   }
@@ -853,6 +921,7 @@ export async function exportDatabase(): Promise<AppDatabaseSchema> {
     incomes,
     expenses,
     emis,
+    emiPayments,
     transfers,
     creditCards,
     creditCardBills,
@@ -867,6 +936,7 @@ export async function exportDatabase(): Promise<AppDatabaseSchema> {
     getAllFromStore<Income>('incomes'),
     getAllFromStore<Expense>('expenses'),
     getAllFromStore<EmiLoan>('emis'),
+    getAllFromStore<EmiPayment>('emiPayments'),
     getAllFromStore<AccountTransfer>('transfers'),
     getAllFromStore<CreditCard>('creditCards'),
     getAllFromStore<CreditCardBill>('creditCardBills'),
@@ -901,6 +971,7 @@ export async function exportDatabase(): Promise<AppDatabaseSchema> {
     incomes,
     expenses,
     emis,
+    emiPayments,
     transfers,
     creditCards,
     creditCardBills,
@@ -930,6 +1001,9 @@ export async function importDatabase(data: AppDatabaseSchema): Promise<void> {
   }
   if (Array.isArray(data.emis) && data.emis.length > 0) {
     await putItemsInStore('emis', data.emis);
+  }
+  if (Array.isArray(data.emiPayments) && data.emiPayments.length > 0) {
+    await putItemsInStore('emiPayments', data.emiPayments);
   }
   if (Array.isArray(data.transfers) && data.transfers.length > 0) {
     await putItemsInStore('transfers', data.transfers);

@@ -4,6 +4,8 @@ import {
   Income,
   Expense,
   EmiLoan,
+  EmiPayment,
+  MonthlyEmiInstance,
   AccountTransfer,
   CreditCard,
   CreditCardBill,
@@ -23,6 +25,8 @@ import {
   getDueSoonItems,
   calculateEmergencyFundHealth,
   calculateTaxSavings,
+  deriveDueDateForMonth,
+  getMonthlyEmiInstances,
 } from '../services/calculations';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
@@ -50,6 +54,7 @@ interface FinanceContextType {
   incomes: Income[];
   expenses: Expense[];
   emis: EmiLoan[];
+  emiPayments: EmiPayment[];
   transfers: AccountTransfer[];
   creditCards: CreditCard[];
   creditCardBills: CreditCardBill[];
@@ -60,6 +65,7 @@ interface FinanceContextType {
   netWorthSnapshots: NetWorthSnapshot[];
 
   // Derived Reactive Data
+  monthlyEmiInstances: MonthlyEmiInstance[];
   liveBalances: Map<string, number>;
   dashboardMetrics: ReturnType<typeof calculateDashboardMetrics>;
   dueSoonItems: DueSoonItem[];
@@ -84,7 +90,15 @@ interface FinanceContextType {
   addEmi: (emi: Omit<EmiLoan, 'id'>) => Promise<void>;
   updateEmi: (emi: EmiLoan) => Promise<void>;
   deleteEmi: (id: string) => Promise<void>;
-  markEmiPaid: (id: string) => Promise<void>;
+  markEmiPaid: (
+    loanId: string,
+    month?: string,
+    paidAmount?: number,
+    paidDate?: string,
+    accountId?: string
+  ) => Promise<void>;
+  markEmiUnpaid: (loanId: string, month?: string) => Promise<void>;
+  updateEmiPayment: (payment: EmiPayment) => Promise<void>;
 
   addTransfer: (transfer: Omit<AccountTransfer, 'id'>) => Promise<void>;
   updateTransfer: (transfer: AccountTransfer) => Promise<void>;
@@ -124,19 +138,19 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const PAGE_STORE_MAP: Record<string, db.StoreName[]> = {
-  dashboard: ['accounts', 'incomes', 'expenses', 'emis', 'transfers', 'creditCards'],
+  dashboard: ['accounts', 'incomes', 'expenses', 'emis', 'emiPayments', 'transfers', 'creditCards'],
   accounts: ['accounts', 'transfers'],
   income: ['incomes', 'accounts'],
   expenses: ['expenses', 'accounts', 'creditCards'],
   budget: ['budgetCategories', 'expenses'],
-  emi: ['emis', 'accounts'],
+  emi: ['emis', 'emiPayments', 'accounts'],
   transfers: ['transfers', 'accounts'],
   'credit-cards': ['creditCards', 'creditCardBills', 'accounts'],
   'savings-goals': ['savingsGoals', 'accounts', 'expenses'],
-  'net-worth': ['netWorthSnapshots', 'accounts', 'emis', 'creditCards'],
+  'net-worth': ['netWorthSnapshots', 'accounts', 'emis', 'emiPayments', 'creditCards'],
   'recurring-bills': ['recurringBills', 'accounts'],
   'tax-saver': ['taxSavings'],
-  runway: ['accounts', 'expenses', 'incomes', 'emis'],
+  runway: ['accounts', 'expenses', 'incomes', 'emis', 'emiPayments'],
 };
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -155,6 +169,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
   const [emis, setEmis] = useState<EmiLoan[]>(
     () => db.getCachedStore<EmiLoan>('emis') || []
+  );
+  const [emiPayments, setEmiPayments] = useState<EmiPayment[]>(
+    () => db.getCachedStore<EmiPayment>('emiPayments') || []
   );
   const [transfers, setTransfers] = useState<AccountTransfer[]>(
     () => db.getCachedStore<AccountTransfer>('transfers') || []
@@ -225,6 +242,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         break;
       case 'emis':
         setEmis(data);
+        break;
+      case 'emiPayments':
+        setEmiPayments(data);
         break;
       case 'transfers':
         setTransfers(data);
@@ -329,9 +349,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [loadPageData]);
 
   // Derived Calculations
+  const monthlyEmiInstances = useMemo(() => {
+    return getMonthlyEmiInstances(emis, emiPayments, selectedMonth);
+  }, [emis, emiPayments, selectedMonth]);
+
   const liveBalances = useMemo(() => {
-    return calculateLiveBalances(accounts, incomes, expenses, transfers, emis);
-  }, [accounts, incomes, expenses, transfers, emis]);
+    return calculateLiveBalances(accounts, incomes, expenses, transfers, emis, emiPayments);
+  }, [accounts, incomes, expenses, transfers, emis, emiPayments]);
 
   const dashboardMetrics = useMemo(() => {
     return calculateDashboardMetrics(
@@ -341,13 +365,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       incomes,
       expenses,
       emis,
-      creditCards
+      creditCards,
+      emiPayments
     );
-  }, [selectedMonth, accounts, liveBalances, incomes, expenses, emis, creditCards]);
+  }, [selectedMonth, accounts, liveBalances, incomes, expenses, emis, creditCards, emiPayments]);
 
   const dueSoonItems = useMemo(() => {
-    return getDueSoonItems(expenses, emis, recurringBills, accounts);
-  }, [expenses, emis, recurringBills, accounts]);
+    return getDueSoonItems(expenses, emis, recurringBills, accounts, undefined, emiPayments);
+  }, [expenses, emis, recurringBills, accounts, emiPayments]);
 
   const emergencyHealth = useMemo(() => {
     return calculateEmergencyFundHealth(savingsGoals, expenses, selectedMonth);
@@ -530,9 +555,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // EMIs
   const addEmi = async (data: Omit<EmiLoan, 'id'>) => {
     const tempId = `emi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const startDate = data.startDate || data.dueDate || new Date().toISOString().slice(0, 10);
     let newEmi: EmiLoan = {
       ...data,
       id: tempId,
+      startDate,
     };
     setEmis((prev) => [...prev, newEmi]);
     await runMutationWithSync(async () => {
@@ -542,6 +569,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setEmis((prev) => prev.map((e) => (e.id === tempId ? saved : e)));
       }
     });
+
+    // If marked Paid upon creation, record the payment row for the initial month
+    if (data.status === 'Paid') {
+      const initialMonth = startDate.slice(0, 7) || selectedMonth;
+      await markEmiPaid(newEmi.id, initialMonth, newEmi.monthlyAmount, startDate, newEmi.accountId);
+    }
   };
 
   const updateEmi = async (emi: EmiLoan) => {
@@ -551,17 +584,122 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const deleteEmi = async (id: string) => {
     setEmis((prev) => prev.filter((e) => e.id !== id));
-    await runMutationWithSync(() => db.deleteItemFromStore('emis', id));
+    const relatedPayments = emiPayments.filter((p) => p.loanId === id);
+    setEmiPayments((prev) => prev.filter((p) => p.loanId !== id));
+
+    await runMutationWithSync(async () => {
+      await db.deleteItemFromStore('emis', id);
+      for (const p of relatedPayments) {
+        await db.deleteItemFromStore('emiPayments', p.id);
+      }
+    });
   };
 
-  const markEmiPaid = async (id: string) => {
-    const target = emis.find((e) => e.id === id);
-    if (!target) return;
-    const updated: EmiLoan = {
-      ...target,
-      status: 'Paid',
-    };
-    await updateEmi(updated);
+  const markEmiPaid = async (
+    loanId: string,
+    targetMonth: string = selectedMonth,
+    paidAmount?: number,
+    paidDate?: string,
+    accountId?: string
+  ) => {
+    const targetLoan = emis.find((e) => e.id === loanId);
+    if (!targetLoan) return;
+
+    const existingPayment = emiPayments.find(
+      (p) => p.loanId === loanId && p.month === targetMonth
+    );
+
+    const actualPaidAmount = paidAmount !== undefined ? paidAmount : targetLoan.monthlyAmount;
+    const actualPaidDate = paidDate || new Date().toISOString().slice(0, 10);
+    const actualAccountId = accountId || targetLoan.accountId;
+
+    if (existingPayment) {
+      const updatedPayment: EmiPayment = {
+        ...existingPayment,
+        status: 'Paid',
+        paidAmount: actualPaidAmount,
+        paidDate: actualPaidDate,
+        accountId: actualAccountId,
+      };
+      setEmiPayments((prev) =>
+        prev.map((p) => (p.id === existingPayment.id ? updatedPayment : p))
+      );
+      await runMutationWithSync(() =>
+        db.putItemInStore('emiPayments', updatedPayment)
+      );
+    } else {
+      const derivedDueDate = deriveDueDateForMonth(
+        targetLoan.dueDate || targetLoan.startDate || `${targetMonth}-01`,
+        targetMonth
+      );
+      const tempId = `emip-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      let newPayment: EmiPayment = {
+        id: tempId,
+        loanId,
+        month: targetMonth,
+        dueDate: derivedDueDate,
+        amount: targetLoan.monthlyAmount,
+        status: 'Paid',
+        paidDate: actualPaidDate,
+        paidAmount: actualPaidAmount,
+        accountId: actualAccountId,
+      };
+
+      setEmiPayments((prev) => [...prev, newPayment]);
+      await runMutationWithSync(async () => {
+        const saved = await db.putItemInStore('emiPayments', newPayment);
+        if (saved && saved.id && saved.id !== tempId) {
+          newPayment = saved;
+          setEmiPayments((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+        }
+      });
+    }
+  };
+
+  const markEmiUnpaid = async (loanId: string, targetMonth: string = selectedMonth) => {
+    const existingPayment = emiPayments.find(
+      (p) => p.loanId === loanId && p.month === targetMonth
+    );
+    if (existingPayment) {
+      const updatedPayment: EmiPayment = {
+        ...existingPayment,
+        status: 'Pending',
+        paidDate: undefined,
+        paidAmount: 0,
+      };
+      setEmiPayments((prev) =>
+        prev.map((p) => (p.id === existingPayment.id ? updatedPayment : p))
+      );
+      await runMutationWithSync(() =>
+        db.putItemInStore('emiPayments', updatedPayment)
+      );
+    } else {
+      const targetLoan = emis.find((e) => e.id === loanId);
+      if (!targetLoan) return;
+      const derivedDueDate = deriveDueDateForMonth(
+        targetLoan.dueDate || targetLoan.startDate || `${targetMonth}-01`,
+        targetMonth
+      );
+      const tempId = `emip-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const newPayment: EmiPayment = {
+        id: tempId,
+        loanId,
+        month: targetMonth,
+        dueDate: derivedDueDate,
+        amount: targetLoan.monthlyAmount,
+        status: 'Pending',
+        accountId: targetLoan.accountId,
+      };
+      setEmiPayments((prev) => [...prev, newPayment]);
+      await runMutationWithSync(() =>
+        db.putItemInStore('emiPayments', newPayment)
+      );
+    }
+  };
+
+  const updateEmiPayment = async (payment: EmiPayment) => {
+    setEmiPayments((prev) => prev.map((p) => (p.id === payment.id ? payment : p)));
+    await runMutationWithSync(() => db.putItemInStore('emiPayments', payment));
   };
 
   // Transfers
@@ -911,6 +1049,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         incomes,
         expenses,
         emis,
+        emiPayments,
         transfers,
         creditCards,
         creditCardBills,
@@ -919,6 +1058,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         taxSavings,
         budgetCategories,
         netWorthSnapshots,
+        monthlyEmiInstances,
         liveBalances,
         dashboardMetrics,
         dueSoonItems,
@@ -939,6 +1079,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateEmi,
         deleteEmi,
         markEmiPaid,
+        markEmiUnpaid,
+        updateEmiPayment,
         addTransfer,
         updateTransfer,
         deleteTransfer,

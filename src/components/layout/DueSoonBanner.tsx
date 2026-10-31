@@ -34,7 +34,8 @@ export const DueSoonBanner: React.FC = () => {
     if (item.source === 'Expense') {
       await markExpensePaid(item.id);
     } else if (item.source === 'EMI') {
-      await markEmiPaid(item.id);
+      const targetMonth = item.dueDate ? item.dueDate.slice(0, 7) : undefined;
+      await markEmiPaid(item.id, targetMonth);
     } else if (item.source === 'RecurringBill') {
       await markRecurringBillPaid(item.id);
     }
