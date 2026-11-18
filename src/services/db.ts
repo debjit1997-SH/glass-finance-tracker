@@ -715,11 +715,11 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
 
 /**
  * Calls Google Apps Script Web App: GET ?sheet=SheetName
- * Includes a 15s AbortController timeout to handle Google Apps Script cold-starts
+ * Allows the proxy read deadline plus network overhead for Apps Script cold starts
  */
 export async function apiGet<T>(
   sheetName: string,
-  timeoutMs: number = 15000
+  timeoutMs: number = 55000
 ): Promise<T[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
@@ -891,7 +891,68 @@ function serializeRow(row: any): any {
 
 const storeRevision = new Map<StoreName, number>();
 
-export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
+/** One authenticated request, validated in full before updating any local cache. */
+export async function getStoresBatch(
+  stores: StoreName[]
+): Promise<Partial<Record<StoreName, any[]>>> {
+  const remote = stores.filter((s) => s !== 'settings');
+  if (!remote.length)
+    return Object.fromEntries(stores.map((s) => [s, getCachedStore(s) || []]));
+  const revisions = remote.map((s) => storeRevision.get(s) || 0);
+  let result: any;
+  try {
+    const response = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'readMany',
+        sheets: [...new Set(remote.map((s) => SHEET_NAMES[s]))],
+      }),
+      signal: AbortSignal.timeout(55000),
+    });
+    result = await response.json();
+    if (!response.ok || result.success !== true)
+      throw new Error(
+        result.error === 'Unknown table.' || result.error === 'Unknown action.'
+          ? 'Update the Apps Script deployment with the sync fix, then retry.'
+          : result.error || 'Could not load account data.'
+      );
+  } catch (error: any) {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError')
+      throw new Error(
+        'Google Sheets took too long to respond. Your records are unchanged. Please retry.'
+      );
+    throw error;
+  }
+  for (const store of remote) {
+    if (!Array.isArray(result.data?.[SHEET_NAMES[store]]))
+      throw new Error(
+        'Incomplete Sheet response. Previous records are still shown; please retry.'
+      );
+  }
+  if (remote.some((s, i) => (storeRevision.get(s) || 0) !== revisions[i]))
+    throw new Error(
+      'Records changed during sync. Please refresh to load the latest balances.'
+    );
+  const entries = await Promise.all(
+    stores.map(
+      async (store) =>
+        [
+          store,
+          await getAllFromStore(
+            store,
+            store === 'settings' ? undefined : result.data[SHEET_NAMES[store]]
+          ),
+        ] as const
+    )
+  );
+  return Object.fromEntries(entries);
+}
+
+export async function getAllFromStore<T>(
+  storeName: StoreName,
+  suppliedRows?: any[]
+): Promise<T[]> {
   if (storeName === 'settings') {
     const cached = getCachedStore<T>('settings');
     return cached || [];
@@ -901,7 +962,7 @@ export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
   const revision = storeRevision.get(storeName) || 0;
 
   try {
-    const rawRows = await apiGet<any>(sheetName);
+    const rawRows = suppliedRows ?? (await apiGet<any>(sheetName));
     // Eliminate blank/empty/corrupted rows from Google Sheets
     const nonEmpty = rawRows
       .filter((r) => !isRowEmpty(r))

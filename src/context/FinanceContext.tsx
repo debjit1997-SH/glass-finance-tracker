@@ -293,6 +293,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({
   );
   const fetchedStoresRef = useRef<Set<db.StoreName>>(new Set());
   const mutationCount = useRef(0);
+  const loadQueue = useRef<Promise<void>>(Promise.resolve());
   const inFlightStoresRef = useRef<Set<db.StoreName>>(new Set());
 
   // Applies fetched sheet data directly, fully replacing state even when a sheet is empty
@@ -358,61 +359,66 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({
     [loadingStores]
   );
 
-  // Lazy, per-page loader parallelized with Promise.all
-  // Total wait time is bounded by the single slowest sheet required by the current page
+  // Queue page snapshots so rapid navigation does not launch overlapping Sheet reads.
   const loadPageData = useCallback(
-    async (page: string, force = false) => {
-      const requiredStores = PAGE_STORE_MAP[page] || ['accounts', 'expenses'];
-      const storesToFetch = requiredStores.filter(
-        (s) =>
-          !inFlightStoresRef.current.has(s) &&
-          (force || !fetchedStoresRef.current.has(s))
-      );
-
-      if (storesToFetch.length === 0) return;
-
-      // Mark stores as in-flight immediately to prevent concurrent re-fetches
-      storesToFetch.forEach((s) => inFlightStoresRef.current.add(s));
-
-      setLoadingStores((prev) => {
-        const next = { ...prev };
-        storesToFetch.forEach((s) => {
-          next[s] = true;
-        });
-        return next;
-      });
-      setIsSyncing(true);
-      setSyncStatus('syncing');
-
-      const errors: string[] = [];
-      try {
-        await Promise.all(
-          storesToFetch.map(async (store) => {
-            try {
-              const data = await db.getAllFromStore<any>(store);
-              fetchedStoresRef.current.add(store);
-              // Do not replace a form's pending mutation with an older GET.
-              if (mutationCount.current === 0) applyStoreData(store, data);
-            } catch (err: any) {
-              errors.push(`${store}: ${err.message}`);
-            } finally {
-              inFlightStoresRef.current.delete(store);
-              setLoadingStores((prev) => ({ ...prev, [store]: false }));
-            }
-          })
+    (page: string, force = false) => {
+      const run = loadQueue.current.then(async () => {
+        const requiredStores = PAGE_STORE_MAP[page] || ['accounts', 'expenses'];
+        const storesToFetch = requiredStores.filter(
+          (s) =>
+            !inFlightStoresRef.current.has(s) &&
+            (force || !fetchedStoresRef.current.has(s))
         );
 
-        if (errors.length) throw new Error(errors.join(' • '));
-        setSyncStatus('synced');
-        setSyncError(null);
-      } catch (err: any) {
-        console.warn('[GAS] Load page data error:', err);
-        setSyncStatus('error');
-        setSyncError(err.message || 'Failed to sync with Google Sheets');
-      } finally {
-        setIsSyncing(false);
-        setIsLoading(false);
-      }
+        if (storesToFetch.length === 0) return;
+
+        // Mark stores as in-flight immediately to prevent concurrent re-fetches
+        storesToFetch.forEach((s) => inFlightStoresRef.current.add(s));
+
+        setLoadingStores((prev) => {
+          const next = { ...prev };
+          storesToFetch.forEach((s) => {
+            next[s] = true;
+          });
+          return next;
+        });
+        setIsSyncing(true);
+        setSyncStatus('syncing');
+
+        try {
+          const snapshot = await db.getStoresBatch(storesToFetch);
+          // React batches these updates: no intermediate partial account totals.
+          if (mutationCount.current !== 0)
+            throw new Error(
+              'A save is in progress. Refresh after it finishes.'
+            );
+          storesToFetch.forEach((store) => {
+            applyStoreData(store, snapshot[store] || []);
+            fetchedStoresRef.current.add(store);
+          });
+          setSyncStatus('synced');
+          setSyncError(null);
+        } catch (err: any) {
+          console.warn('[GAS] Load page data error:', err);
+          setSyncStatus('error');
+          setSyncError(err.message || 'Failed to sync with Google Sheets');
+        } finally {
+          storesToFetch.forEach((store) =>
+            inFlightStoresRef.current.delete(store)
+          );
+          setLoadingStores((prev) => {
+            const next = { ...prev };
+            storesToFetch.forEach((store) => {
+              next[store] = false;
+            });
+            return next;
+          });
+          setIsSyncing(false);
+          setIsLoading(false);
+        }
+      });
+      loadQueue.current = run.catch(() => {});
+      return run;
     },
     [applyStoreData]
   );

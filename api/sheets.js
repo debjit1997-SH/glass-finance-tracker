@@ -35,6 +35,7 @@ export default async function handler(req, res) {
         : await readBody(req);
     const allowed = [
       'read',
+      'readMany',
       'capabilities',
       'create',
       'update',
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
     const body = {
       action: input.action,
       sheet: input.sheet,
+      sheets: input.sheets,
       row: input.row,
       id: input.id,
       expectedRevision: input.expectedRevision,
@@ -83,7 +85,9 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(body),
       redirect: 'follow',
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(
+        ['read', 'readMany'].includes(input.action) ? 45000 : 25000
+      ),
     });
     if (!response.ok)
       return send(res, 502, {

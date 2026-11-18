@@ -400,6 +400,27 @@ function doPost(e) {
         writesEnabled: props.getProperty('AURA_WRITES_ENABLED') === 'true',
         backupCreated: Boolean(props.getProperty('AURA_BACKUP_ID')),
       });
+    if (body.action === 'readMany') {
+      if (!Array.isArray(body.sheets) || !body.sheets.length ||
+          body.sheets.length > Object.keys(SCHEMA).length ||
+          body.sheets.some(name => !Object.prototype.hasOwnProperty.call(SCHEMA, name)))
+        throw new Error('Invalid table list.');
+      lock = LockService.getScriptLock();
+      lock.waitLock(15000);
+      const data = {};
+      for (const name of [...new Set(body.sheets)]) {
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) throw new Error('Sheet not found: ' + name);
+        const range = sheet.getDataRange();
+        const values = range.getValues(), formulas = range.getFormulas();
+        const headers = values[0];
+        if (!headers.includes('id')) throw new Error('Missing id column: ' + name);
+        data[name] = values.slice(1)
+          .map((v, i) => rowObject_(ss, headers, v, formulas[i + 1]))
+          .filter(r => r.id !== '' && !r[DELETED]);
+      }
+      return jsonResponse({ success: true, data });
+    }
     if (['previewAdjustment', 'adjustBalance'].includes(body.action)) {
       lock = LockService.getScriptLock();
       lock.waitLock(15000);
