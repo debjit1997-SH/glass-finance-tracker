@@ -391,6 +391,17 @@ function doPost(e) {
       });
     const ss = spreadsheet_(),
       props = PropertiesService.getScriptProperties();
+    // Verification and write share one execution; unsupported older deployments fail closed.
+    if (body.action === 'verifiedMutation') {
+      if (!['create', 'update', 'delete', 'adjustBalance'].includes(body.operation))
+        throw new Error('Unknown mutation operation.');
+      if (props.getProperty('AURA_SCHEMA_VERSION') !== '2' ||
+          props.getProperty('AURA_WRITES_ENABLED') !== 'true' ||
+          !props.getProperty('AURA_BACKUP_ID') ||
+          props.getProperty('AURA_BACKUP_SOURCE') !== ss.getId())
+        throw new Error('Verified backup and enabled writes are required.');
+      body.action = body.operation;
+    }
     if (body.action === 'capabilities')
       return jsonResponse({
         success: true,

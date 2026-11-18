@@ -45,31 +45,12 @@ export default async function handler(req, res) {
     ];
     if (!allowed.includes(input.action))
       return send(res, 400, { error: 'Unknown action' });
-    if (
-      ['create', 'update', 'delete', 'adjustBalance'].includes(input.action)
-    ) {
-      const check = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'capabilities', token }),
-        redirect: 'follow',
-        signal: AbortSignal.timeout(15000),
-      });
-      const capabilities = await check.json();
-      if (
-        !check.ok ||
-        capabilities.version !== 2 ||
-        !capabilities.schemaReady ||
-        !capabilities.writesEnabled ||
-        !capabilities.backupCreated ||
-        (input.action === 'adjustBalance' && !capabilities.accountAdjustment)
-      )
-        return send(res, 409, {
-          error: 'Verified v2 backend, backup and enabled writes are required.',
-        });
-    }
+    const mutation = ['create', 'update', 'delete', 'adjustBalance'].includes(
+      input.action
+    );
     const body = {
-      action: input.action,
+      action: mutation ? 'verifiedMutation' : input.action,
+      operation: mutation ? input.action : undefined,
       sheet: input.sheet,
       sheets: input.sheets,
       row: input.row,
@@ -97,6 +78,12 @@ export default async function handler(req, res) {
     const result = await response.json();
     if (!result || typeof result !== 'object')
       throw new Error('Invalid response');
+    if (mutation && result.success !== true && !result.code)
+      return send(res, 409, {
+        error:
+          result.error ||
+          'Save was not confirmed. Update the Apps Script deployment, then refresh before retrying.',
+      });
     return send(
       res,
       result.code === 'AUTH_REQUIRED'

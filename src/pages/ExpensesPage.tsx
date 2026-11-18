@@ -1,11 +1,22 @@
-import { TransactionFilters, emptyTransactionFilter, matchesTransaction } from '../components/TransactionFilters';
+import {
+  useTransactionPage,
+  TransactionPagination,
+} from '../components/TransactionPagination';
+import {
+  TransactionFilters,
+  emptyTransactionFilter,
+  matchesTransaction,
+} from '../components/TransactionFilters';
 import { localDate } from '../services/financeRules';
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
 import { GlassModal } from '../components/ui/GlassModal';
 import { GlassDatePicker } from '../components/ui/GlassDatePicker';
-import { TableRowSkeleton, StatCardSkeleton } from '../components/ui/GlassSkeleton';
+import {
+  TableRowSkeleton,
+  StatCardSkeleton,
+} from '../components/ui/GlassSkeleton';
 import { Expense, ExpenseStatus } from '../types/finance';
 import {
   ArrowUpRight,
@@ -24,7 +35,9 @@ interface ExpensesPageProps {
   onOpenAddExpense: () => void;
 }
 
-export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) => {
+export const ExpensesPage: React.FC<ExpensesPageProps> = ({
+  onOpenAddExpense,
+}) => {
   const {
     expenses,
     accounts,
@@ -43,12 +56,18 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
   const [formBusy, setFormBusy] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Paid' | 'Pending' | 'Overdue'>('All');
+  const [statusFilter, setStatusFilter] = useState<
+    'All' | 'Paid' | 'Pending' | 'Overdue'
+  >('All');
 
   const todayStr = localDate();
 
   // Filter by month
-  const monthlyExpenses = expenses.filter((e) => (filters.allMonths || e.date.startsWith(selectedMonth)) && matchesTransaction(e, filters));
+  const monthlyExpenses = expenses.filter(
+    (e) =>
+      (filters.allMonths || e.date.startsWith(selectedMonth)) &&
+      matchesTransaction(e, filters)
+  );
 
   // Category & Status filter
   const filteredExpenses = monthlyExpenses.filter((e) => {
@@ -57,7 +76,15 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
     return true;
   });
 
-  const totalExpected = monthlyExpenses.reduce((s, e) => s + e.expectedAmount, 0);
+  const pagination = useTransactionPage(
+    filteredExpenses,
+    JSON.stringify([selectedMonth, filters, statusFilter, categoryFilter])
+  );
+
+  const totalExpected = monthlyExpenses.reduce(
+    (s, e) => s + e.expectedAmount,
+    0
+  );
   const totalPaid = monthlyExpenses
     .filter((e) => e.status === 'Paid')
     .reduce((s, e) => s + (e.actualAmount ?? e.expectedAmount), 0);
@@ -71,12 +98,17 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingExpense) return;
-    setFormBusy(true); setFormError('');
+    setFormBusy(true);
+    setFormError('');
     try {
       if (editingExpense.id) await updateExpense(editingExpense);
       else await addExpense(editingExpense);
       setEditingExpense(null);
-    } catch (error: any) { setFormError(error.message); } finally { setFormBusy(false); }
+    } catch (error: any) {
+      setFormError(error.message);
+    } finally {
+      setFormBusy(false);
+    }
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -104,7 +136,11 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      <TransactionFilters value={filters} onChange={setFilters} accounts={accounts}/>
+      <TransactionFilters
+        value={filters}
+        onChange={setFilters}
+        accounts={accounts}
+      />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -113,7 +149,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
             Monthly Expenses
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Log routine expenditures, utilities, dining, and auto-flagged overdue payments
+            Log routine expenditures, utilities, dining, and auto-flagged
+            overdue payments
           </p>
         </div>
 
@@ -137,7 +174,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
             {totalExpected.toLocaleString('en-IN')}
           </div>
           <div className="text-[11px] text-slate-400 mt-0.5">
-            {monthlyExpenses.length} logged {monthlyExpenses.length === 1 ? 'item' : 'items'} this month
+            {monthlyExpenses.length} logged{' '}
+            {monthlyExpenses.length === 1 ? 'item' : 'items'} this month
           </div>
         </GlassCard>
 
@@ -162,7 +200,9 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
             {settings.currency}
             {totalPending.toLocaleString('en-IN')}
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Upcoming payments due</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            Upcoming payments due
+          </div>
         </GlassCard>
       </div>
 
@@ -206,6 +246,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
       </div>
 
       {/* Expenses Table */}
+      <TransactionPagination pagination={pagination} />
       <GlassCard className="p-0 overflow-hidden">
         {filteredExpenses.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">
@@ -228,105 +269,141 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filteredExpenses.map((exp) => {
+                {pagination.rows.map((exp, rowIndex) => {
                   const isPaid = exp.status === 'Paid';
                   const isOverdue =
                     exp.status === 'Overdue' ||
                     (exp.status === 'Pending' && exp.date < todayStr);
-                  const accountName = accountMap.get(exp.accountId) || 'Unknown Account';
+                  const accountName =
+                    accountMap.get(exp.accountId) || 'Unknown Account';
 
                   return (
-                    <tr key={exp.id} className="hover:bg-white/[0.03] transition-colors group">
-                      <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
-                        {exp.date}
-                      </td>
+                    <React.Fragment key={exp.id}>
+                      {(rowIndex === 0 ||
+                        pagination.rows[rowIndex - 1].date !== exp.date) && (
+                        <tr className="bg-white/5">
+                          <th
+                            scope="rowgroup"
+                            colSpan={9}
+                            className="px-4 py-2 text-left font-semibold text-slate-300"
+                          >
+                            {exp.date || 'No date'}
+                          </th>
+                        </tr>
+                      )}
+                      <tr
+                        key={exp.id}
+                        className="hover:bg-white/[0.03] transition-colors group"
+                      >
+                        <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
+                          {exp.date}
+                        </td>
 
-                      <td className="py-3.5 px-4 font-medium text-white">
-                        <div className="font-semibold">{exp.name}</div>
-                        {exp.notes && (
-                          <div className="text-[10px] text-slate-400 truncate max-w-xs">
-                            {exp.notes}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/10">
-                          <Tag className="w-3 h-3 text-purple-400" />
-                          {exp.category}
-                        </span>
-                      </td>
-
-                      <td className="py-3.5 px-4 text-purple-300 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <Wallet className="w-3.5 h-3.5 opacity-70" />
-                          <span>{accountName}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-semibold text-slate-300 whitespace-nowrap">
-                        {settings.currency}
-                        {exp.expectedAmount.toLocaleString('en-IN')}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-bold text-rose-400 whitespace-nowrap">
-                        {isPaid ? (
-                          `${settings.currency}${(
-                            exp.actualAmount ?? exp.expectedAmount
-                          ).toLocaleString('en-IN')}`
-                        ) : (
-                          <span className="text-slate-500">—</span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-slate-400 whitespace-nowrap">
-                        {exp.actualDate || '—'}
-                      </td>
-
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        {isPaid ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" /> Paid
-                          </span>
-                        ) : isOverdue ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
-                            <AlertCircle className="w-3 h-3 text-rose-400" /> Overdue
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            <Clock className="w-3 h-3" /> Pending
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {!isPaid && (
-                            <button
-                              onClick={() => markExpensePaid(exp.id)}
-                              className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[10px] font-semibold transition-colors flex items-center gap-1"
-                            >
-                              <CheckCircle2 className="w-3 h-3" /> Mark Paid
-                            </button>
+                        <td className="py-3.5 px-4 font-medium text-white">
+                          <div className="font-semibold">{exp.name}</div>
+                          {exp.notes && (
+                            <div className="text-[10px] text-slate-400 truncate max-w-xs">
+                              {exp.notes}
+                            </div>
                           )}
-                          <button type="button" title="Copy as new pending entry" className="text-xs text-indigo-300 px-2" onClick={() => { setFormError(''); setEditingExpense({...exp, id: '', date: localDate(), actualAmount: 0, actualDate: '', status: 'Pending'}); }}>Copy</button>
-                          <button
-                            onClick={() => setEditingExpense(exp)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(exp.id, exp.name)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800 text-slate-300 border border-white/10">
+                            <Tag className="w-3 h-3 text-purple-400" />
+                            {exp.category}
+                          </span>
+                        </td>
+
+                        <td className="py-3.5 px-4 text-purple-300 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <Wallet className="w-3.5 h-3.5 opacity-70" />
+                            <span>{accountName}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono font-semibold text-slate-300 whitespace-nowrap">
+                          {settings.currency}
+                          {exp.expectedAmount.toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono font-bold text-rose-400 whitespace-nowrap">
+                          {isPaid ? (
+                            `${settings.currency}${(
+                              exp.actualAmount ?? exp.expectedAmount
+                            ).toLocaleString('en-IN')}`
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono text-slate-400 whitespace-nowrap">
+                          {exp.actualDate || '—'}
+                        </td>
+
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {isPaid ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> Paid
+                            </span>
+                          ) : isOverdue ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                              <AlertCircle className="w-3 h-3 text-rose-400" />{' '}
+                              Overdue
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <Clock className="w-3 h-3" /> Pending
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {!isPaid && (
+                              <button
+                                onClick={() => markExpensePaid(exp.id)}
+                                className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[10px] font-semibold transition-colors flex items-center gap-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3" /> Mark Paid
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              title="Copy as new pending entry"
+                              className="text-xs text-indigo-300 px-2"
+                              onClick={() => {
+                                setFormError('');
+                                setEditingExpense({
+                                  ...exp,
+                                  id: '',
+                                  date: localDate(),
+                                  actualAmount: 0,
+                                  actualDate: '',
+                                  status: 'Pending',
+                                });
+                              }}
+                            >
+                              Copy
+                            </button>
+                            <button
+                              onClick={() => setEditingExpense(exp)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(exp.id, exp.name)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -335,16 +412,24 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
         )}
       </GlassCard>
 
+      <TransactionPagination pagination={pagination} />
+
       {/* Edit Expense Modal */}
       {editingExpense && (
         <GlassModal
           isOpen={true}
           onClose={() => setEditingExpense(null)}
-          title={editingExpense?.id ? "Edit Expense Record" : "Copy as new expense"}
+          title={
+            editingExpense?.id ? 'Edit Expense Record' : 'Copy as new expense'
+          }
           subtitle="Modify details, account debited, or mark as paid"
         >
           <form onSubmit={handleEditSubmit} className="space-y-4">
-            {formError && <p role="alert" className="text-sm text-rose-300">{formError}</p>}
+            {formError && (
+              <p role="alert" className="text-sm text-rose-300">
+                {formError}
+              </p>
+            )}
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 Expense Name
@@ -377,7 +462,10 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                 <select
                   value={editingExpense.category}
                   onChange={(e) =>
-                    setEditingExpense({ ...editingExpense, category: e.target.value })
+                    setEditingExpense({
+                      ...editingExpense,
+                      category: e.target.value,
+                    })
                   }
                   className="glass-input w-full mt-1 text-sm bg-slate-900"
                 >
@@ -396,7 +484,10 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                 <select
                   value={editingExpense.accountId}
                   onChange={(e) =>
-                    setEditingExpense({ ...editingExpense, accountId: e.target.value })
+                    setEditingExpense({
+                      ...editingExpense,
+                      accountId: e.target.value,
+                    })
                   }
                   className="glass-input w-full mt-1 text-sm bg-slate-900"
                 >
@@ -412,7 +503,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Expected Amount ({settings.currency}) <span className="text-rose-400">*</span>
+                  Expected Amount ({settings.currency}){' '}
+                  <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="number"
@@ -480,7 +572,10 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                   label="Actual Payment Date"
                   value={editingExpense.actualDate}
                   onChange={(e) =>
-                    setEditingExpense({ ...editingExpense, actualDate: e.target.value })
+                    setEditingExpense({
+                      ...editingExpense,
+                      actualDate: e.target.value,
+                    })
                   }
                 />
               ) : (
@@ -499,7 +594,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                 Cancel
               </button>
               <button
-                type="submit" disabled={formBusy}
+                type="submit"
+                disabled={formBusy}
                 className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-semibold"
               >
                 Save Changes

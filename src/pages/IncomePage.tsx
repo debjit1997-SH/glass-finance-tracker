@@ -1,11 +1,22 @@
-import { TransactionFilters, emptyTransactionFilter, matchesTransaction } from '../components/TransactionFilters';
+import {
+  useTransactionPage,
+  TransactionPagination,
+} from '../components/TransactionPagination';
+import {
+  TransactionFilters,
+  emptyTransactionFilter,
+  matchesTransaction,
+} from '../components/TransactionFilters';
 import { localDate } from '../services/financeRules';
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
 import { GlassModal } from '../components/ui/GlassModal';
 import { GlassDatePicker } from '../components/ui/GlassDatePicker';
-import { TableRowSkeleton, StatCardSkeleton } from '../components/ui/GlassSkeleton';
+import {
+  TableRowSkeleton,
+  StatCardSkeleton,
+} from '../components/ui/GlassSkeleton';
 import { Income, IncomeStatus } from '../types/finance';
 import {
   ArrowDownLeft,
@@ -40,17 +51,31 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
   const [formError, setFormError] = useState('');
   const [formBusy, setFormBusy] = useState(false);
   const [editingIncome, setEditingIncome] = useState<Income | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Received' | 'Pending'>('All');
+  const [statusFilter, setStatusFilter] = useState<
+    'All' | 'Received' | 'Pending'
+  >('All');
 
   // Filter incomes by selected month
-  const monthlyIncomes = incomes.filter((i) => (filters.allMonths || i.date.startsWith(selectedMonth)) && matchesTransaction(i, filters));
+  const monthlyIncomes = incomes.filter(
+    (i) =>
+      (filters.allMonths || i.date.startsWith(selectedMonth)) &&
+      matchesTransaction(i, filters)
+  );
 
   const filteredIncomes = monthlyIncomes.filter((i) => {
     if (statusFilter === 'All') return true;
     return i.status === statusFilter;
   });
 
-  const totalExpected = monthlyIncomes.reduce((s, i) => s + i.expectedAmount, 0);
+  const pagination = useTransactionPage(
+    filteredIncomes,
+    JSON.stringify([selectedMonth, filters, statusFilter])
+  );
+
+  const totalExpected = monthlyIncomes.reduce(
+    (s, i) => s + i.expectedAmount,
+    0
+  );
   const totalReceived = monthlyIncomes
     .filter((i) => i.status === 'Received')
     .reduce((s, i) => s + (i.actualAmount ?? i.expectedAmount), 0);
@@ -64,12 +89,17 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingIncome) return;
-    setFormBusy(true); setFormError('');
+    setFormBusy(true);
+    setFormError('');
     try {
       if (editingIncome.id) await updateIncome(editingIncome);
       else await addIncome(editingIncome);
       setEditingIncome(null);
-    } catch (error: any) { setFormError(error.message); } finally { setFormBusy(false); }
+    } catch (error: any) {
+      setFormError(error.message);
+    } finally {
+      setFormBusy(false);
+    }
   };
 
   const handleDelete = async (id: string, source: string) => {
@@ -97,7 +127,11 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      <TransactionFilters value={filters} onChange={setFilters} accounts={accounts}/>
+      <TransactionFilters
+        value={filters}
+        onChange={setFilters}
+        accounts={accounts}
+      />
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -130,7 +164,8 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
             {totalExpected.toLocaleString('en-IN')}
           </div>
           <div className="text-[11px] text-slate-400 mt-0.5">
-            {monthlyIncomes.length} total stream {monthlyIncomes.length === 1 ? 'entry' : 'entries'}
+            {monthlyIncomes.length} total stream{' '}
+            {monthlyIncomes.length === 1 ? 'entry' : 'entries'}
           </div>
         </GlassCard>
 
@@ -155,7 +190,9 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
             {settings.currency}
             {totalPending.toLocaleString('en-IN')}
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Awaiting payout clearance</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            Awaiting payout clearance
+          </div>
         </GlassCard>
       </div>
 
@@ -183,6 +220,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
       </div>
 
       {/* Incomes Table / Card List */}
+      <TransactionPagination pagination={pagination} />
       <GlassCard className="p-0 overflow-hidden">
         {filteredIncomes.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">
@@ -204,94 +242,126 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filteredIncomes.map((inc) => {
+                {pagination.rows.map((inc, rowIndex) => {
                   const isReceived = inc.status === 'Received';
-                  const accountName = accountMap.get(inc.accountId) || 'Unknown Account';
+                  const accountName =
+                    accountMap.get(inc.accountId) || 'Unknown Account';
 
                   return (
-                    <tr
-                      key={inc.id}
-                      className="hover:bg-white/[0.03] transition-colors group"
-                    >
-                      <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
-                        {inc.date}
-                      </td>
+                    <React.Fragment key={inc.id}>
+                      {(rowIndex === 0 ||
+                        pagination.rows[rowIndex - 1].date !== inc.date) && (
+                        <tr className="bg-white/5">
+                          <th
+                            scope="rowgroup"
+                            colSpan={8}
+                            className="px-4 py-2 text-left font-semibold text-slate-300"
+                          >
+                            {inc.date || 'No date'}
+                          </th>
+                        </tr>
+                      )}
+                      <tr
+                        key={inc.id}
+                        className="hover:bg-white/[0.03] transition-colors group"
+                      >
+                        <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
+                          {inc.date}
+                        </td>
 
-                      <td className="py-3.5 px-4 font-medium text-white">
-                        <div className="font-semibold">{inc.source}</div>
-                        {inc.notes && (
-                          <div className="text-[10px] text-slate-400 truncate max-w-xs">
-                            {inc.notes}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-purple-300 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <Wallet className="w-3.5 h-3.5 opacity-70" />
-                          <span>{accountName}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-semibold text-slate-300 whitespace-nowrap">
-                        {settings.currency}
-                        {inc.expectedAmount.toLocaleString('en-IN')}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-400 whitespace-nowrap">
-                        {isReceived ? (
-                          `${settings.currency}${(
-                            inc.actualAmount ?? inc.expectedAmount
-                          ).toLocaleString('en-IN')}`
-                        ) : (
-                          <span className="text-slate-500">—</span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-slate-400 whitespace-nowrap">
-                        {inc.actualDate || '—'}
-                      </td>
-
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        {isReceived ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" /> Received
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            <Clock className="w-3 h-3" /> Pending
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {!isReceived && (
-                            <button
-                              onClick={() => markIncomeReceived(inc.id)}
-                              className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[10px] font-semibold transition-colors flex items-center gap-1"
-                            >
-                              <CheckCircle2 className="w-3 h-3" /> Received
-                            </button>
+                        <td className="py-3.5 px-4 font-medium text-white">
+                          <div className="font-semibold">{inc.source}</div>
+                          {inc.notes && (
+                            <div className="text-[10px] text-slate-400 truncate max-w-xs">
+                              {inc.notes}
+                            </div>
                           )}
-                          <button type="button" title="Copy as new pending entry" className="text-xs text-indigo-300 px-2" onClick={() => { setFormError(''); setEditingIncome({...inc, id: '', date: localDate(), actualAmount: 0, actualDate: '', status: 'Pending'}); }}>Copy</button>
-                          <button
-                            onClick={() => setEditingIncome(inc)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(inc.id, inc.source)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+
+                        <td className="py-3.5 px-4 text-purple-300 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <Wallet className="w-3.5 h-3.5 opacity-70" />
+                            <span>{accountName}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono font-semibold text-slate-300 whitespace-nowrap">
+                          {settings.currency}
+                          {inc.expectedAmount.toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono font-bold text-emerald-400 whitespace-nowrap">
+                          {isReceived ? (
+                            `${settings.currency}${(
+                              inc.actualAmount ?? inc.expectedAmount
+                            ).toLocaleString('en-IN')}`
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono text-slate-400 whitespace-nowrap">
+                          {inc.actualDate || '—'}
+                        </td>
+
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {isReceived ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> Received
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <Clock className="w-3 h-3" /> Pending
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {!isReceived && (
+                              <button
+                                onClick={() => markIncomeReceived(inc.id)}
+                                className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[10px] font-semibold transition-colors flex items-center gap-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3" /> Received
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              title="Copy as new pending entry"
+                              className="text-xs text-indigo-300 px-2"
+                              onClick={() => {
+                                setFormError('');
+                                setEditingIncome({
+                                  ...inc,
+                                  id: '',
+                                  date: localDate(),
+                                  actualAmount: 0,
+                                  actualDate: '',
+                                  status: 'Pending',
+                                });
+                              }}
+                            >
+                              Copy
+                            </button>
+                            <button
+                              onClick={() => setEditingIncome(inc)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(inc.id, inc.source)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -300,16 +370,24 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
         )}
       </GlassCard>
 
+      <TransactionPagination pagination={pagination} />
+
       {/* Edit Income Modal */}
       {editingIncome && (
         <GlassModal
           isOpen={true}
           onClose={() => setEditingIncome(null)}
-          title={editingIncome?.id ? "Edit Income Record" : "Copy as new income"}
+          title={
+            editingIncome?.id ? 'Edit Income Record' : 'Copy as new income'
+          }
           subtitle="Modify amounts, scheduled date, or account credited"
         >
           <form onSubmit={handleEditSubmit} className="space-y-4">
-            {formError && <p role="alert" className="text-sm text-rose-300">{formError}</p>}
+            {formError && (
+              <p role="alert" className="text-sm text-rose-300">
+                {formError}
+              </p>
+            )}
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 Source
@@ -342,7 +420,10 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                 <select
                   value={editingIncome.accountId}
                   onChange={(e) =>
-                    setEditingIncome({ ...editingIncome, accountId: e.target.value })
+                    setEditingIncome({
+                      ...editingIncome,
+                      accountId: e.target.value,
+                    })
                   }
                   className="glass-input w-full mt-1 text-sm bg-slate-900"
                 >
@@ -418,7 +499,10 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                 label="Actual Credit Date"
                 value={editingIncome.actualDate}
                 onChange={(e) =>
-                  setEditingIncome({ ...editingIncome, actualDate: e.target.value })
+                  setEditingIncome({
+                    ...editingIncome,
+                    actualDate: e.target.value,
+                  })
                 }
               />
             )}
@@ -432,7 +516,8 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                 Cancel
               </button>
               <button
-                type="submit" disabled={formBusy}
+                type="submit"
+                disabled={formBusy}
                 className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-semibold"
               >
                 Save Changes
