@@ -1,3 +1,4 @@
+import { localDate } from '../../services/financeRules';
 import React, { useState } from 'react';
 import { GlassModal } from '../ui/GlassModal';
 import { GlassDatePicker } from '../ui/GlassDatePicker';
@@ -11,7 +12,7 @@ interface AddTaxSavingModalProps {
 export const AddTaxSavingModal: React.FC<AddTaxSavingModalProps> = ({ isOpen, onClose }) => {
   const { addTaxSaving, taxMetrics, settings } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
   const [name, setName] = useState('');
   const [section, setSection] = useState<'80C' | '80D'>('80C');
   const [amount, setAmount] = useState('');

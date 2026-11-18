@@ -1,3 +1,4 @@
+import { RecurringTemplates } from '../components/RecurringTemplates';
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -25,7 +26,7 @@ export const RecurringBillsPage: React.FC<RecurringBillsPageProps> = ({
   onOpenAddRecurring,
 }) => {
   const {
-    recurringBills,
+    recurringBills: allRecurringBills,
     accounts,
     budgetCategories,
     updateRecurringBill,
@@ -41,6 +42,7 @@ export const RecurringBillsPage: React.FC<RecurringBillsPageProps> = ({
   accounts.forEach((a) => accountMap.set(a.id, a.name));
 
   // Compute monthly normalized expense
+  const recurringBills = allRecurringBills.filter(b => !b.templateEnabled);
   const monthlyNormalizedTotal = recurringBills.reduce((sum, b) => {
     if (b.frequency === 'Monthly') return sum + b.amount;
     if (b.frequency === 'Yearly') return sum + b.amount / 12;
@@ -81,6 +83,7 @@ export const RecurringBillsPage: React.FC<RecurringBillsPageProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
+      <RecurringTemplates/>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -196,11 +199,12 @@ export const RecurringBillsPage: React.FC<RecurringBillsPageProps> = ({
 
               <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
                 <button
+                  title="Advance the due date only; does not record a payment or expense"
                   onClick={() => markRecurringBillPaid(bill.id)}
                   className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 transition-colors flex items-center gap-1"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  Renew / Mark Paid
+                  Advance renewal
                 </button>
 
                 <div className="flex items-center gap-1">

@@ -1,3 +1,4 @@
+import { localDate } from '../../services/financeRules';
 import React, { useState } from 'react';
 import { GlassModal } from '../ui/GlassModal';
 import { GlassDatePicker } from '../ui/GlassDatePicker';
@@ -12,7 +13,7 @@ interface AddExpenseModalProps {
 export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ isOpen, onClose }) => {
   const { accounts, budgetCategories, addExpense, settings } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
   const [date, setDate] = useState(todayStr);
   const [name, setName] = useState('');
   const [category, setCategory] = useState(budgetCategories[0]?.category || 'Food');

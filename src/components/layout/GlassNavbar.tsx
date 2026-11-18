@@ -1,3 +1,5 @@
+import { localDate } from '../../services/financeRules';
+import { ThemeToggle } from './ThemeToggle';
 import React, { useState } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import {
@@ -60,7 +62,7 @@ export const GlassNavbar: React.FC<GlassNavbarProps> = ({
   })();
 
   const isCurrentActualMonth =
-    selectedMonth === new Date().toISOString().slice(0, 7);
+    selectedMonth === localDate().slice(0, 7);
 
   return (
     <>
@@ -79,11 +81,12 @@ export const GlassNavbar: React.FC<GlassNavbarProps> = ({
                   AuraFinance
                 </span>
                 <span className="hidden md:inline-block ml-2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                  Google Sheets Backend
+                  Personal finance
                 </span>
               </div>
             </div>
 
+            <ThemeToggle />
             {/* Mobile Actions */}
             <div className="sm:hidden flex items-center gap-2">
               <button
@@ -146,7 +149,7 @@ export const GlassNavbar: React.FC<GlassNavbarProps> = ({
 
             {!isCurrentActualMonth && (
               <button
-                onClick={() => setSelectedMonth(new Date().toISOString().slice(0, 7))}
+                onClick={() => setSelectedMonth(localDate().slice(0, 7))}
                 className="ml-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
               >
                 Current
@@ -171,13 +174,13 @@ export const GlassNavbar: React.FC<GlassNavbarProps> = ({
                 >
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                   <span className="text-[11px] font-semibold underline decoration-amber-400/50">
-                    Sheets Auth Needed
+                    Sync needs attention
                   </span>
                 </button>
               ) : (
                 <div className="flex items-center gap-1.5 text-emerald-300">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-[11px] font-medium">Sheets Connected</span>
+                  <span className="text-[11px] font-medium">{syncStatus === 'synced' ? 'Up to date' : 'Not yet verified'}</span>
                 </div>
               )}
 
@@ -295,63 +298,8 @@ export const GlassNavbar: React.FC<GlassNavbarProps> = ({
         )}
       </header>
 
-      {/* Google Apps Script Deployment Help Modal */}
-      <GlassModal
-        isOpen={showHelpModal}
-        onClose={() => setShowHelpModal(false)}
-        title="Google Apps Script Setup Guide"
-        subtitle="Enable anonymous browser API access for your Google Sheet"
-        maxWidth="lg"
-      >
-        <div className="space-y-4 text-xs text-slate-300">
-          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 space-y-1">
-            <div className="font-semibold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              Why is this permission needed?
-            </div>
-            <p className="text-[11px] leading-relaxed opacity-90">
-              Google Apps Script Web Apps require that the deployment permission <strong>"Who has access"</strong> is set to <strong>"Anyone"</strong>. If it is set to "Only myself" or restricted to your domain, Google automatically redirects API calls to Google Sign-In, which causes browser CORS / 401 errors.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <div className="font-bold text-white text-sm">4 Simple Steps to Authorize:</div>
-            <ol className="list-decimal list-inside space-y-2.5 pl-1 text-[12px]">
-              <li className="leading-relaxed">
-                Open your Google Apps Script project editor at{' '}
-                <a
-                  href="https://script.google.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-purple-400 hover:underline inline-flex items-center gap-1"
-                >
-                  script.google.com <ExternalLink className="w-3 h-3" />
-                </a>
-              </li>
-              <li className="leading-relaxed">
-                In the top-right toolbar, click <strong>Deploy</strong> &rarr; <strong>Manage deployments</strong>.
-              </li>
-              <li className="leading-relaxed">
-                Click the <strong>Edit (pencil)</strong> icon next to the active deployment.
-              </li>
-              <li className="leading-relaxed">
-                Under <strong>"Who has access"</strong>, select <strong>"Anyone"</strong> (do not choose "Only myself"), and click <strong>Deploy</strong>.
-              </li>
-            </ol>
-          </div>
-
-          <div className="pt-2 flex justify-end gap-2">
-            <button
-              onClick={() => {
-                setShowHelpModal(false);
-                refreshAllFromDB();
-              }}
-              className="glass-btn-primary px-4 py-2 rounded-xl text-xs font-semibold"
-            >
-              I Have Updated It &mdash; Retry Connection
-            </button>
-          </div>
-        </div>
+      <GlassModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} title="Sync status" subtitle="Your last confirmed records stay visible." maxWidth="lg">
+        <div className="space-y-4 text-sm"><p>{syncError || 'Refresh to check your Google Sheets connection.'}</p><p className="text-slate-400">A failed connection is not a successful save. If a save timed out, refresh and check the record before retrying. Do not change sharing permissions as a general fix.</p><button onClick={() => { setShowHelpModal(false); void refreshAllFromDB(); }} className="glass-btn-primary px-4 py-2 rounded-xl">Refresh records</button></div>
       </GlassModal>
     </>
   );

@@ -1,0 +1,79 @@
+// Backup of the script supplied in chat; chat HTML/backslash escaping normalized.
+const SCHEMA = {
+ 'Accounts': ['id','Name','Type','OpeningBalance','Notes'],
+ 'Income Tracker': ['id','Date','Source','ExpectedAmount','Account','ActualAmount','ActualDate','Status','Notes'],
+ 'Expense Tracker': ['id','Date','Name','Category','ExpectedAmount','Account','ActualAmount','ActualDate','Status','Notes'],
+ 'EMI Tracker': ['id','LoanName','Lender','MonthlyAmount','OutstandingPrincipal','InterestRate','DueDate','Account','Status','Notes'],
+ 'Account Transfers': ['id','Date','FromAccount','ToAccount','Amount','Reason','Status','Notes'],
+ 'Credit Card Tracker': ['id','CardName','CreditLimit','CurrentUnbilled','BillingMonth','StatementDate','BillAmount','AmountPaid','PaymentDueDate','PaymentDateActual','Status','Notes'],
+ 'Savings Goals': ['id','GoalName','TargetAmount','TargetDate','CurrentSaved','Notes'],
+ 'Net Worth Snapshots': ['id','Date','TotalAssets','TotalLiabilities','NetWorth'],
+ 'Recurring Bills': ['id','Name','Amount','Frequency','NextRenewalDate','Category','Account','Notes'],
+ 'Tax Saver': ['id','Name','Section','Amount','Date'],
+ 'Budget vs Actual': ['id','Category','MonthlyBudget','Month']
+};
+function setupSheets() {
+ const ss = SpreadsheetApp.getActiveSpreadsheet();
+ Object.keys(SCHEMA).forEach(sheetName => {
+   let sheet = ss.getSheetByName(sheetName);
+   if (!sheet) sheet = ss.insertSheet(sheetName);
+   const headers = SCHEMA[sheetName];
+   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+ });
+}
+function doGet(e) {
+ const sheetName = e.parameter.sheet;
+ const ss = SpreadsheetApp.getActiveSpreadsheet();
+ const sheet = ss.getSheetByName(sheetName);
+ if (!sheet) return jsonResponse({ error: 'Sheet not found: ' + sheetName });
+ const data = sheet.getDataRange().getValues();
+ const headers = data[0];
+ const rows = data.slice(1).map(row => {
+   const obj = {};
+   headers.forEach((h, i) => obj[h] = row[i]);
+   return obj;
+ });
+ return jsonResponse(rows);
+}
+function doPost(e) {
+ const body = JSON.parse(e.postData.contents);
+ const { sheet: sheetName, action, row, id } = body;
+ const ss = SpreadsheetApp.getActiveSpreadsheet();
+ const sheet = ss.getSheetByName(sheetName);
+ if (!sheet) return jsonResponse({ error: 'Sheet not found: ' + sheetName });
+ const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+ if (action === 'create') {
+   const newId = Utilities.getUuid();
+   row.id = newId;
+   sheet.appendRow(headers.map(h => row[h] !== undefined ? row[h] : ''));
+   return jsonResponse({ success: true, id: newId });
+ }
+ if (action === 'update') {
+   const data = sheet.getDataRange().getValues();
+   const idCol = headers.indexOf('id');
+   for (let i = 1; i < data.length; i++) {
+     if (data[i][idCol] === id) {
+       headers.forEach((h, colIdx) => {
+         if (row[h] !== undefined) sheet.getRange(i + 1, colIdx + 1).setValue(row[h]);
+       });
+       return jsonResponse({ success: true });
+     }
+   }
+   return jsonResponse({ error: 'Row not found' });
+ }
+ if (action === 'delete') {
+   const data = sheet.getDataRange().getValues();
+   const idCol = headers.indexOf('id');
+   for (let i = 1; i < data.length; i++) {
+     if (data[i][idCol] === id) {
+       sheet.deleteRow(i + 1);
+       return jsonResponse({ success: true });
+     }
+   }
+   return jsonResponse({ error: 'Row not found' });
+ }
+ return jsonResponse({ error: 'Unknown action' });
+}
+function jsonResponse(obj) {
+ return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}

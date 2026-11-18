@@ -2,556 +2,506 @@ import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
 import { GlassModal } from '../components/ui/GlassModal';
-import { GlassDatePicker } from '../components/ui/GlassDatePicker';
-import { StatCardSkeleton, AccountCardSkeleton, TableRowSkeleton } from '../components/ui/GlassSkeleton';
-import { CreditCard, CreditCardBill, CreditCardBillStatus } from '../types/finance';
+import { billDueDate, billStatus, localDate } from '../services/financeRules';
+import { deriveDueDateForMonth } from '../services/calculations';
+import type { CreditCard, CreditCardBill } from '../types/finance';
 import {
-  CreditCard as CardIcon,
   Plus,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
-  ShieldCheck,
-  ArrowRight,
-  TrendingDown,
-  Calendar,
-  Wallet,
-  Sparkles,
-  Edit2,
-  Trash2,
+  CreditCard as CardIcon,
+  CalendarDays,
+  CheckCheck,
 } from 'lucide-react';
 
-interface CreditCardPageProps {
+export const CreditCardPage = ({
+  onOpenAddCard,
+}: {
   onOpenAddCard: () => void;
-}
-
-export const CreditCardPage: React.FC<CreditCardPageProps> = ({ onOpenAddCard }) => {
+}) => {
   const {
     creditCards,
     creditCardBills,
-    accounts,
-    liveBalances,
     addCreditCardBill,
     payCreditCardBill,
     updateCreditCard,
-    deleteCreditCard,
+    selectedMonth,
     settings,
-    isStoreLoading,
+    isSyncing,
   } = useFinance();
-
-  const [payingBill, setPayingBill] = useState<CreditCardBill | null>(null);
-  const [payFromAccountId, setPayFromAccountId] = useState(
-    accounts.find((a) => a.type === 'bank')?.id || accounts[0]?.id || ''
-  );
+  const [logging, setLogging] = useState(false);
+  const [cardId, setCardId] = useState('');
+  const [statementDate, setStatementDate] = useState(localDate());
+  const [dueDate, setDueDate] = useState(billDueDate(localDate()));
+  const [amount, setAmount] = useState('');
+  const [paying, setPaying] = useState<CreditCardBill | null>(null);
+  const [paymentDate, setPaymentDate] = useState(localDate());
   const [payAmount, setPayAmount] = useState('');
-  const [isLoggingBill, setIsLoggingBill] = useState(false);
-  const [selectedCardId, setSelectedCardId] = useState(creditCards[0]?.id || '');
-
-  // Log new bill form state
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const currentMonth = todayStr.slice(0, 7);
-  const [billMonth, setBillMonth] = useState(currentMonth);
-  const [statementDate, setStatementDate] = useState(todayStr);
-  const [billAmount, setBillAmount] = useState('');
-  const [dueDate, setDueDate] = useState(todayStr);
-
-  const bankAccounts = accounts.filter((a) => a.type === 'bank' || a.type === 'wallet');
-
-  // Compute stats per card
-  const cardSnapshots = creditCards.map((card) => {
-    const cardAccountBalance = liveBalances.get(card.accountId) || 0;
-    const liability = cardAccountBalance < 0 ? Math.abs(cardAccountBalance) : 0;
-
-    // Find pending bills for this card
-    const cardBills = creditCardBills.filter((b) => b.cardId === card.id);
-    const pendingBill = cardBills.find(
-      (b) => b.status === 'Pending' || b.status === 'Partial' || b.status === 'Overdue'
-    );
-    const statementDue = pendingBill
-      ? Math.max(0, pendingBill.billAmount - pendingBill.amountPaid)
-      : 0;
-
-    const totalOutstanding = (card.currentUnbilled || 0) + statementDue + liability;
-    const availableBalance = Math.max(0, card.limit - totalOutstanding);
-    const utilization = card.limit > 0 ? (totalOutstanding / card.limit) * 100 : 0;
-
-    return {
-      card,
-      statementDue,
-      totalOutstanding,
-      availableBalance,
-      utilization,
-    };
-  });
-
-  const handlePayBillSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!payingBill || !payFromAccountId || !payAmount) return;
-
-    await payCreditCardBill(payingBill.id, payFromAccountId, parseFloat(payAmount));
-    setPayingBill(null);
-    setPayAmount('');
+  const [editing, setEditing] = useState<CreditCard | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const money = (n: number) =>
+    `${settings.currency}${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+  const bills = [...creditCardBills]
+    .filter(
+      (b) =>
+        showAll ||
+        b.billingMonth === selectedMonth ||
+        !creditCards.some((c) => c.id === b.cardId)
+    )
+    .sort((a, b) => b.statementDate.localeCompare(a.statementDate));
+  const openBills = creditCardBills.filter((b) => b.amountPaid < b.billAmount);
+  const outstanding = openBills.reduce(
+    (n, b) => n + Math.max(0, b.billAmount - b.amountPaid),
+    0
+  );
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
-
-  const handleLogBillSubmit = async (e: React.FormEvent) => {
+  const chooseCard = (id: string) => {
+    setCardId(id);
+    const card = creditCards.find((c) => c.id === id);
+    if (card) {
+      const date = deriveDueDateForMonth(
+        `2000-01-${String(card.statementDay).padStart(2, '0')}`,
+        selectedMonth
+      );
+      setStatementDate(date);
+      setDueDate(billDueDate(date, card.dueDay));
+    }
+  };
+  const logBill = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCardId || !billAmount) return;
-
-    const amt = parseFloat(billAmount);
-    let status: CreditCardBillStatus = 'Pending';
-    if (dueDate < todayStr) status = 'Overdue';
-
-    await addCreditCardBill({
-      cardId: selectedCardId,
-      billingMonth: billMonth,
-      statementDate,
-      billAmount: amt,
-      amountPaid: 0,
-      paymentDueDate: dueDate,
-      paymentDateActual: '',
-      status,
+    void run(async () => {
+      if (!creditCards.some((c) => c.id === cardId))
+        throw new Error('Choose a card.');
+      if (
+        creditCardBills.some(
+          (b) =>
+            b.cardId === cardId && b.billingMonth === statementDate.slice(0, 7)
+        )
+      )
+        throw new Error(
+          'A bill already exists for this card and month. Review the existing bill instead of adding a duplicate.'
+        );
+      if (dueDate <= statementDate)
+        throw new Error('Due date must be after the bill date.');
+      await addCreditCardBill({
+        cardId,
+        billingMonth: statementDate.slice(0, 7),
+        statementDate,
+        billAmount: Number(amount),
+        amountPaid: 0,
+        paymentDueDate: dueDate,
+        paymentDateActual: '',
+        status: 'Pending',
+        payments: [],
+      });
+      setLogging(false);
+      setAmount('');
     });
-
-    setIsLoggingBill(false);
-    setBillAmount('');
   };
-
-  if (isStoreLoading('creditCards') && creditCards.length === 0) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCardSkeleton />
-          <StatCardSkeleton />
-          <StatCardSkeleton />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <AccountCardSkeleton />
-          <AccountCardSkeleton />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            <CardIcon className="w-5 h-5 text-purple-400" />
-            Credit Card Tracker
+          <p className="eyebrow">Bills, without the busywork</p>
+          <h2 className="text-2xl font-bold flex gap-2 items-center">
+            <CardIcon />
+            Credit cards
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Credit limits, unbilled cycle transactions, statement bills, and zero double-counting settlement
+          <p className="text-sm text-slate-400 mt-2">
+            Statement → due date → paid. Your bank balances are separate.
           </p>
         </div>
-
-        <div className="flex items-center gap-2.5">
+        <div className="flex gap-2">
           <button
-            onClick={() => setIsLoggingBill(true)}
-            className="glass-btn-secondary px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4 text-purple-400" />
-            <span>Log Statement Bill</span>
-          </button>
-
-          <button
+            className="glass-btn-secondary px-4 py-2 rounded-xl"
             onClick={onOpenAddCard}
-            className="glass-btn-primary px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Credit Card</span>
+            Add card
+          </button>
+          <button
+            disabled={!creditCards.length || isSyncing}
+            className="glass-btn-primary px-4 py-2 rounded-xl flex gap-2 items-center"
+            onClick={() => {
+              chooseCard(creditCards[0]?.id || '');
+              setError('');
+              setLogging(true);
+            }}
+          >
+            <Plus size={16} />
+            Log bill
           </button>
         </div>
       </div>
-
-      {/* No Double Counting Architecture Rule Notice */}
-      <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-500/25 text-xs text-purple-200 flex items-start gap-3">
-        <ShieldCheck className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <h4 className="font-bold text-white text-sm">
-            Credit Card Logging &amp; Zero Double-Counting Architecture
-          </h4>
-          <p className="text-slate-300">
-            • <strong>Card Swipes:</strong> Logged as routine Expenses debited from your Credit Card Account (increasing card debt).
-            <br />
-            • <strong>Bill Payments:</strong> Handled via the &quot;Pay Bill&quot; action which executes an internal transfer from your Bank Account to your Credit Card Account.
-            <br />
-            • <strong>Result:</strong> Zero duplicate expenses while bank cash balances and credit limits update in perfect harmony.
+      <div className="grid sm:grid-cols-3 gap-4">
+        <GlassCard className="p-5">
+          <p className="eyebrow">Unpaid bills · all months</p>
+          <p className="text-3xl font-semibold mt-3">{money(outstanding)}</p>
+        </GlassCard>
+        <GlassCard className="p-5">
+          <p className="eyebrow">Awaiting payment</p>
+          <p className="text-3xl font-semibold mt-3">{openBills.length}</p>
+        </GlassCard>
+        <GlassCard className="p-5">
+          <p className="eyebrow">Past due</p>
+          <p className="text-3xl font-semibold mt-3 text-rose-300">
+            {openBills.filter((b) => b.paymentDueDate < localDate()).length}
           </p>
-        </div>
+        </GlassCard>
       </div>
-
-      {/* Cards Snapshot Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {cardSnapshots.map(({ card, statementDue, totalOutstanding, availableBalance, utilization }) => {
-          const isHighUtil = utilization > 30;
-          const isDangerUtil = utilization > 50;
-
-          return (
-            <GlassCard
-              key={card.id}
-              className="p-5 flex flex-col justify-between relative overflow-hidden group"
-            >
-              <div>
-                {/* Card Brand & Header */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2.5 rounded-xl bg-purple-500/15 text-purple-300 border border-purple-500/30">
-                      <CardIcon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-white tracking-tight">{card.name}</h4>
-                      <span className="text-[11px] text-slate-400">{card.bank}</span>
-                    </div>
-                  </div>
-
-                  <span
-                    className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                      isDangerUtil
-                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                        : isHighUtil
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                    }`}
-                  >
-                    {utilization.toFixed(0)}% Utilized
-                  </span>
-                </div>
-
-                {/* Metrics Breakdown */}
-                <div className="space-y-2 text-xs p-3.5 rounded-xl bg-slate-900/60 border border-white/5">
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Credit Limit:</span>
-                    <span className="font-mono text-white font-semibold">
-                      {settings.currency}
-                      {card.limit.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Current Unbilled:</span>
-                    <span className="font-mono text-amber-300">
-                      {settings.currency}
-                      {(card.currentUnbilled || 0).toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Current Statement Due:</span>
-                    <span className="font-mono text-rose-300">
-                      {settings.currency}
-                      {statementDue.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-white/5 font-bold">
-                    <span className="text-slate-200">Total Outstanding:</span>
-                    <span className="font-mono text-rose-400">
-                      {settings.currency}
-                      {totalOutstanding.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-400 font-bold">
-                    <span className="text-emerald-400">Available Balance:</span>
-                    <span className="font-mono text-emerald-400">
-                      {settings.currency}
-                      {availableBalance.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Utilization Bar */}
-              <div className="mt-4 pt-3 border-t border-white/5">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                  <span>Safe &lt; 30%</span>
-                  <span>{utilization.toFixed(1)}% of limit</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      isDangerUtil ? 'bg-rose-500' : isHighUtil ? 'bg-amber-500' : 'bg-emerald-500'
-                    }`}
-                    style={{ width: `${Math.min(100, utilization)}%` }}
-                  />
-                </div>
-              </div>
-            </GlassCard>
-          );
-        })}
-      </div>
-
-      {/* Credit Card Billing Log */}
-      <GlassCard className="p-0 overflow-hidden">
-        <div className="p-4 border-b border-white/10 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white">Credit Card Statement &amp; Billing Log</h3>
-          <span className="text-xs text-slate-400">{creditCardBills.length} statements logged</span>
-        </div>
-
-        {creditCardBills.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">
-            No statement bills recorded yet. Click &quot;Log Statement Bill&quot; to track monthly cycle statements.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-white/10 bg-slate-900/50 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-4">Card</th>
-                  <th className="py-3 px-4">Billing Month</th>
-                  <th className="py-3 px-4">Statement Date</th>
-                  <th className="py-3 px-4">Bill Amount</th>
-                  <th className="py-3 px-4">Amount Paid</th>
-                  <th className="py-3 px-4">Payment Due Date</th>
-                  <th className="py-3 px-4">Actual Pay Date</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {creditCardBills.map((bill) => {
-                  const card = creditCards.find((c) => c.id === bill.cardId);
-                  const isPaid = bill.status === 'Paid';
-                  const isOverdue =
-                    bill.status === 'Overdue' ||
-                    (bill.status === 'Pending' && bill.paymentDueDate < todayStr);
-
-                  return (
-                    <tr key={bill.id} className="hover:bg-white/[0.03] transition-colors group">
-                      <td className="py-3.5 px-4 font-bold text-white whitespace-nowrap">
-                        {card?.name || 'Card'}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-purple-300 whitespace-nowrap">
-                        {bill.billingMonth}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
-                        {bill.statementDate}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-bold text-white whitespace-nowrap">
-                        {settings.currency}
-                        {bill.billAmount.toLocaleString('en-IN')}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-400 whitespace-nowrap">
-                        {bill.amountPaid > 0
-                          ? `${settings.currency}${bill.amountPaid.toLocaleString('en-IN')}`
-                          : '—'}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-slate-300 whitespace-nowrap">
-                        {bill.paymentDueDate}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-slate-400 whitespace-nowrap">
-                        {bill.paymentDateActual || '—'}
-                      </td>
-
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        {isPaid ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" /> Paid
-                          </span>
-                        ) : isOverdue ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
-                            <AlertCircle className="w-3 h-3 text-rose-400" /> Overdue
-                          </span>
-                        ) : bill.status === 'Partial' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            <Clock className="w-3 h-3" /> Partial
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                            <Clock className="w-3 h-3" /> Pending
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {!isPaid && (
-                          <button
-                            onClick={() => {
-                              setPayingBill(bill);
-                              setPayAmount((bill.billAmount - bill.amountPaid).toString());
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[10px] font-semibold transition-colors inline-flex items-center gap-1"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Pay Bill
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </GlassCard>
-
-      {/* Pay Credit Card Bill Modal */}
-      {payingBill && (
-        <GlassModal
-          isOpen={true}
-          onClose={() => setPayingBill(null)}
-          title="Pay Credit Card Bill"
-          subtitle="Transfers payment from Bank to Credit Card without double-counting expenses"
-        >
-          <form onSubmit={handlePayBillSubmit} className="space-y-4">
-            <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-500/20 text-xs text-purple-200">
-              Bill Amount: <strong>{settings.currency}{payingBill.billAmount.toLocaleString('en-IN')}</strong>
-              {payingBill.amountPaid > 0 && ` (Already paid: ${settings.currency}${payingBill.amountPaid.toLocaleString('en-IN')})`}
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {creditCards.map((card) => (
+          <GlassCard key={card.id} className="p-5">
+            <div className="flex justify-between gap-2">
+              <h3 className="font-semibold">{card.name}</h3>
+              <button
+                className="text-sm text-indigo-300"
+                onClick={() => {
+                  setEditing(card);
+                  setError('');
+                }}
+              >
+                Edit cycle
+              </button>
             </div>
-
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Payment Amount ({settings.currency})
-              </label>
+            <p className="text-sm text-slate-400 mt-3 flex gap-2">
+              <CalendarDays size={16} />
+              Bill day {card.statementDay} · due {card.dueDay} next month
+            </p>
+          </GlassCard>
+        ))}
+      </div>
+      {!creditCards.length && (
+        <GlassCard className="p-8 text-center">
+          <CardIcon className="mx-auto mb-3 text-indigo-300" />
+          <h3 className="font-semibold">A simpler way to track your cards</h3>
+          <p className="text-sm text-slate-400 mt-2">
+            Add a card name and billing cycle to get started.
+          </p>
+        </GlassCard>
+      )}
+      <GlassCard className="overflow-hidden">
+        <div className="p-5 flex justify-between items-center gap-3">
+          <h3 className="font-semibold">Statement history</h3>
+          <label className="text-sm flex gap-2">
+            <input
+              type="checkbox"
+              checked={showAll}
+              onChange={(e) => setShowAll(e.target.checked)}
+            />
+            All months
+          </label>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs uppercase text-slate-400">
+              <tr>
+                {[
+                  'Card / bill date',
+                  'Bill',
+                  'Due date',
+                  'Paid',
+                  'Payment date',
+                  'Status',
+                  '',
+                ].map((h, i) => (
+                  <th key={i} className="px-5 py-3 whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {bills.map((b) => (
+                <tr key={b.id} className="border-t border-white/10">
+                  <td className="px-5 py-4">
+                    <p className="font-semibold">
+                      {creditCards.find((c) => c.id === b.cardId)?.name ||
+                        `Needs matching: ${b.cardId}`}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {b.statementDate || 'Date missing'}
+                    </p>
+                  </td>
+                  <td className="px-5 py-4">{money(b.billAmount)}</td>
+                  <td className="px-5 py-4 whitespace-nowrap">
+                    {b.paymentDueDate}
+                  </td>
+                  <td className="px-5 py-4">{money(b.amountPaid)}</td>
+                  <td className="px-5 py-4 whitespace-nowrap">
+                    {b.paymentDateActual || '—'}
+                    {Boolean(b.payments?.length) && (
+                      <details className="text-xs mt-1">
+                        <summary>History</summary>
+                        {b.payments?.map((p) => (
+                          <p key={p.id}>
+                            {p.date}: {money(p.amount)}
+                          </p>
+                        ))}
+                      </details>
+                    )}
+                  </td>
+                  <td className="px-5 py-4">
+                    <span
+                      className={`status-pill ${b.amountPaid >= b.billAmount ? 'text-emerald-300' : b.paymentDueDate < localDate() ? 'text-rose-300' : 'text-amber-300'}`}
+                    >
+                      {billStatus(b)}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4">
+                    {b.amountPaid < b.billAmount ? (
+                      <button
+                        disabled={busy || isSyncing}
+                        className="glass-btn-secondary px-3 py-2 rounded-xl whitespace-nowrap"
+                        onClick={() => {
+                          setPaying(b);
+                          setPayAmount(
+                            String(
+                              Math.round((b.billAmount - b.amountPaid) * 100) /
+                                100
+                            )
+                          );
+                          setPaymentDate(localDate());
+                          setError('');
+                        }}
+                      >
+                        Record payment
+                      </button>
+                    ) : (
+                      <CheckCheck className="text-emerald-300" />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!bills.length && (
+            <p className="p-8 text-center text-slate-400">
+              No bills for this selection.
+            </p>
+          )}
+        </div>
+      </GlassCard>
+      <p className="text-xs text-slate-400">
+        Existing card records and bank transfers are preserved. Unmatched legacy
+        bills remain visible for review.
+      </p>
+      <GlassModal
+        isOpen={logging}
+        onClose={() => !busy && setLogging(false)}
+        title="Log a statement"
+        subtitle="Enter the amount printed on your bill."
+      >
+        <form onSubmit={logBill} className="space-y-4">
+          <label className="block text-sm">
+            Card
+            <select
+              required
+              className="glass-input w-full mt-2"
+              value={cardId}
+              onChange={(e) => chooseCard(e.target.value)}
+            >
+              <option value="">Choose card</option>
+              {creditCards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm">
+            Bill date
+            <input
+              required
+              type="date"
+              value={statementDate}
+              className="glass-input w-full mt-2"
+              onChange={(e) => {
+                setStatementDate(e.target.value);
+                setDueDate(
+                  billDueDate(
+                    e.target.value,
+                    creditCards.find((c) => c.id === cardId)?.dueDay
+                  )
+                );
+              }}
+            />
+          </label>
+          <label className="block text-sm">
+            Bill amount
+            <input
+              required
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="glass-input w-full mt-2"
+            />
+          </label>
+          <label className="block text-sm">
+            Payment due
+            <input
+              required
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="glass-input w-full mt-2"
+            />
+          </label>
+          {error && (
+            <p role="alert" className="text-rose-300">
+              {error}
+            </p>
+          )}
+          <button
+            disabled={busy}
+            className="glass-btn-primary px-5 py-3 rounded-xl"
+          >
+            {busy ? 'Saving…' : 'Save bill'}
+          </button>
+        </form>
+      </GlassModal>
+      <GlassModal
+        isOpen={Boolean(paying)}
+        onClose={() => !busy && setPaying(null)}
+        title="Record a payment"
+        subtitle="Updates this bill only. Does not debit a bank account."
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              if (paying)
+                await payCreditCardBill(
+                  paying.id,
+                  paymentDate,
+                  Number(payAmount)
+                );
+              setPaying(null);
+            });
+          }}
+        >
+          <label className="block text-sm">
+            Amount paid this time
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              required
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              className="glass-input w-full mt-2"
+            />
+          </label>
+          <label className="block text-sm">
+            Payment date
+            <input
+              type="date"
+              required
+              max={localDate()}
+              min={paying?.statementDate}
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              className="glass-input w-full mt-2"
+            />
+          </label>
+          {error && (
+            <p role="alert" className="text-rose-300">
+              {error}
+            </p>
+          )}
+          <button
+            disabled={busy}
+            className="glass-btn-primary px-5 py-3 rounded-xl"
+          >
+            {busy ? 'Saving…' : 'Confirm payment'}
+          </button>
+        </form>
+      </GlassModal>
+      <GlassModal
+        isOpen={Boolean(editing)}
+        onClose={() => !busy && setEditing(null)}
+        title="Edit billing cycle"
+        subtitle="Existing bills and legacy account details stay unchanged."
+      >
+        {editing && (
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void run(async () => {
+                await updateCreditCard(editing);
+                setEditing(null);
+              });
+            }}
+          >
+            <label className="block text-sm">
+              Card name
+              <input
+                required
+                value={editing.name}
+                onChange={(e) =>
+                  setEditing({ ...editing, name: e.target.value })
+                }
+                className="glass-input w-full mt-2"
+              />
+            </label>
+            <label className="block text-sm">
+              Statement day
               <input
                 type="number"
-                step="any"
+                required
                 min="1"
-                required
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                className="glass-input w-full mt-1 text-sm font-semibold text-emerald-400"
+                max="31"
+                value={editing.statementDay}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    statementDay: Number(e.target.value),
+                  })
+                }
+                className="glass-input w-full mt-2"
               />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Debit Bank Account
-              </label>
-              <select
-                value={payFromAccountId}
-                onChange={(e) => setPayFromAccountId(e.target.value)}
+            </label>
+            <label className="block text-sm">
+              Due day next month
+              <input
+                type="number"
                 required
-                className="glass-input w-full mt-1 text-sm bg-slate-900"
-              >
-                {bankAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} ({settings.currency}
-                    {(liveBalances.get(acc.id) || 0).toLocaleString('en-IN')} available)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => setPayingBill(null)}
-                className="glass-btn-secondary px-4 py-2 rounded-xl text-xs font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-semibold"
-              >
-                Confirm Payment &amp; Transfer
-              </button>
-            </div>
+                min="1"
+                max="31"
+                value={editing.dueDay}
+                onChange={(e) =>
+                  setEditing({ ...editing, dueDay: Number(e.target.value) })
+                }
+                className="glass-input w-full mt-2"
+              />
+            </label>
+            {error && (
+              <p role="alert" className="text-rose-300">
+                {error}
+              </p>
+            )}
+            <button
+              disabled={busy}
+              className="glass-btn-primary px-5 py-3 rounded-xl"
+            >
+              Save cycle
+            </button>
           </form>
-        </GlassModal>
-      )}
-
-      {/* Log New Statement Bill Modal */}
-      {isLoggingBill && (
-        <GlassModal
-          isOpen={true}
-          onClose={() => setIsLoggingBill(false)}
-          title="Log Credit Card Statement Bill"
-          subtitle="Record monthly generated credit card statement for payment scheduling"
-        >
-          <form onSubmit={handleLogBillSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Select Credit Card
-              </label>
-              <select
-                value={selectedCardId}
-                onChange={(e) => setSelectedCardId(e.target.value)}
-                required
-                className="glass-input w-full mt-1 text-sm bg-slate-900"
-              >
-                {creditCards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.bank})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Billing Month (YYYY-MM)
-                </label>
-                <input
-                  type="month"
-                  required
-                  value={billMonth}
-                  onChange={(e) => setBillMonth(e.target.value)}
-                  className="glass-input w-full mt-1 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Bill Amount ({settings.currency})
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  min="1"
-                  required
-                  placeholder="24500"
-                  value={billAmount}
-                  onChange={(e) => setBillAmount(e.target.value)}
-                  className="glass-input w-full mt-1 text-sm font-semibold"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <GlassDatePicker
-                label="Statement Date"
-                required
-                value={statementDate}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStatementDate(e.target.value)}
-              />
-
-              <GlassDatePicker
-                label="Payment Due Date"
-                required
-                value={dueDate}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDueDate(e.target.value)}
-              />
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => setIsLoggingBill(false)}
-                className="glass-btn-secondary px-4 py-2 rounded-xl text-xs font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-semibold"
-              >
-                Log Statement
-              </button>
-            </div>
-          </form>
-        </GlassModal>
-      )}
+        )}
+      </GlassModal>
     </div>
   );
 };

@@ -1,32 +1,23 @@
-# React + TypeScript + Vite
+# AuraFinance
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Personal finance tracker with a Google Sheets database, React/Vite glass interface, credit-card statements, EMI history, recurring templates and a password-protected Vercel API.
 
-Currently, two official plugins are available:
+This branch contains the v2 integration upgrade. It has not been deployed to the user's live Sheet or Vercel project.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Start here:** [বাংলা setup guide](SETUP_BN.md)
+- [Changes, data safeguards and limitations](UPGRADE.md)
+- [Validation results](VALIDATION.txt)
+- [New Apps Script](apps-script/Code.gs)
+- [Supplied original script backup](apps-script/Original_Code.gs.txt)
 
-## React Compiler
+Test on a copied Sheet first. Create `.env.local` using `.env.example`; do not commit credentials. Keep write mode disabled until the copied backend is verified.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm ci
+npm test
+npm run dev:api
+# Another terminal:
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+For production, deploy the entire project including `api/` and `server/`, not only the static `dist/` directory. See the setup guide before changing the existing deployment. Do not run the original script's `setupSheets()` for the upgrade.

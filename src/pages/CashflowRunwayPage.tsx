@@ -1,3 +1,4 @@
+import { localDate } from '../services/financeRules';
 import React, { useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -28,7 +29,7 @@ export const CashflowRunwayPage: React.FC = () => {
     isPageLoading,
   } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
 
   // Compute runway starting from current liquid balance
   const runway = useMemo(() => {

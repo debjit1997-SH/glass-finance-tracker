@@ -1,3 +1,5 @@
+import { TransactionFilters, emptyTransactionFilter, matchesTransaction } from '../components/TransactionFilters';
+import { localDate } from '../services/financeRules';
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -26,6 +28,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
     incomes,
     accounts,
     selectedMonth,
+    addIncome,
     updateIncome,
     deleteIncome,
     markIncomeReceived,
@@ -33,11 +36,14 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
     isStoreLoading,
   } = useFinance();
 
+  const [filters, setFilters] = useState(emptyTransactionFilter);
+  const [formError, setFormError] = useState('');
+  const [formBusy, setFormBusy] = useState(false);
   const [editingIncome, setEditingIncome] = useState<Income | null>(null);
   const [statusFilter, setStatusFilter] = useState<'All' | 'Received' | 'Pending'>('All');
 
   // Filter incomes by selected month
-  const monthlyIncomes = incomes.filter((i) => i.date.startsWith(selectedMonth));
+  const monthlyIncomes = incomes.filter((i) => (filters.allMonths || i.date.startsWith(selectedMonth)) && matchesTransaction(i, filters));
 
   const filteredIncomes = monthlyIncomes.filter((i) => {
     if (statusFilter === 'All') return true;
@@ -47,7 +53,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
   const totalExpected = monthlyIncomes.reduce((s, i) => s + i.expectedAmount, 0);
   const totalReceived = monthlyIncomes
     .filter((i) => i.status === 'Received')
-    .reduce((s, i) => s + (i.actualAmount || i.expectedAmount), 0);
+    .reduce((s, i) => s + (i.actualAmount ?? i.expectedAmount), 0);
   const totalPending = monthlyIncomes
     .filter((i) => i.status === 'Pending')
     .reduce((s, i) => s + i.expectedAmount, 0);
@@ -58,8 +64,12 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingIncome) return;
-    await updateIncome(editingIncome);
-    setEditingIncome(null);
+    setFormBusy(true); setFormError('');
+    try {
+      if (editingIncome.id) await updateIncome(editingIncome);
+      else await addIncome(editingIncome);
+      setEditingIncome(null);
+    } catch (error: any) { setFormError(error.message); } finally { setFormBusy(false); }
   };
 
   const handleDelete = async (id: string, source: string) => {
@@ -87,6 +97,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
+      <TransactionFilters value={filters} onChange={setFilters} accounts={accounts}/>
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -230,7 +241,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                       <td className="py-3.5 px-4 font-mono font-bold text-emerald-400 whitespace-nowrap">
                         {isReceived ? (
                           `${settings.currency}${(
-                            inc.actualAmount || inc.expectedAmount
+                            inc.actualAmount ?? inc.expectedAmount
                           ).toLocaleString('en-IN')}`
                         ) : (
                           <span className="text-slate-500">—</span>
@@ -263,6 +274,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                               <CheckCircle2 className="w-3 h-3" /> Received
                             </button>
                           )}
+                          <button type="button" title="Copy as new pending entry" className="text-xs text-indigo-300 px-2" onClick={() => { setFormError(''); setEditingIncome({...inc, id: '', date: localDate(), actualAmount: 0, actualDate: '', status: 'Pending'}); }}>Copy</button>
                           <button
                             onClick={() => setEditingIncome(inc)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -293,10 +305,11 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
         <GlassModal
           isOpen={true}
           onClose={() => setEditingIncome(null)}
-          title="Edit Income Record"
+          title={editingIncome?.id ? "Edit Income Record" : "Copy as new income"}
           subtitle="Modify amounts, scheduled date, or account credited"
         >
           <form onSubmit={handleEditSubmit} className="space-y-4">
+            {formError && <p role="alert" className="text-sm text-rose-300">{formError}</p>}
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 Source
@@ -419,7 +432,7 @@ export const IncomePage: React.FC<IncomePageProps> = ({ onOpenAddIncome }) => {
                 Cancel
               </button>
               <button
-                type="submit"
+                type="submit" disabled={formBusy}
                 className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-semibold"
               >
                 Save Changes

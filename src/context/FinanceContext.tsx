@@ -1,4 +1,18 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { localDate } from '../services/financeRules';
+import {
+  addMonthsClamped,
+  applyBillPayment,
+  outstandingPrincipal,
+} from '../services/financeRules';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import {
   Account,
   Income,
@@ -73,7 +87,9 @@ interface FinanceContextType {
   taxMetrics: ReturnType<typeof calculateTaxSavings>;
 
   // Mutators
-  addAccount: (account: Omit<Account, 'id' | 'createdAt'> & { id?: string }) => Promise<Account>;
+  addAccount: (
+    account: Omit<Account, 'id' | 'createdAt'> & { id?: string }
+  ) => Promise<Account>;
   updateAccount: (account: Account) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
 
@@ -109,12 +125,20 @@ interface FinanceContextType {
   deleteCreditCard: (id: string) => Promise<void>;
 
   addCreditCardBill: (bill: Omit<CreditCardBill, 'id'>) => Promise<void>;
-  payCreditCardBill: (billId: string, fromBankAccountId: string, amount: number) => Promise<void>;
+  payCreditCardBill: (
+    billId: string,
+    paymentDate: string,
+    amount: number
+  ) => Promise<void>;
 
   addSavingsGoal: (goal: Omit<SavingsGoal, 'id'>) => Promise<void>;
   updateSavingsGoal: (goal: SavingsGoal) => Promise<void>;
   deleteSavingsGoal: (id: string) => Promise<void>;
-  contributeToGoal: (goalId: string, amount: number, fromAccountId: string) => Promise<void>;
+  contributeToGoal: (
+    goalId: string,
+    amount: number,
+    fromAccountId: string
+  ) => Promise<void>;
 
   addRecurringBill: (bill: Omit<RecurringBill, 'id'>) => Promise<void>;
   updateRecurringBill: (bill: RecurringBill) => Promise<void>;
@@ -125,7 +149,10 @@ interface FinanceContextType {
   updateTaxSaving: (item: TaxSavingItem) => Promise<void>;
   deleteTaxSaving: (id: string) => Promise<void>;
 
-  updateBudgetCategoryLimit: (categoryName: string, limit: number) => Promise<void>;
+  updateBudgetCategoryLimit: (
+    categoryName: string,
+    limit: number
+  ) => Promise<void>;
   createMonthlyNetWorthSnapshot: () => Promise<void>;
 
   // Backup & Presets
@@ -138,23 +165,57 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const PAGE_STORE_MAP: Record<string, db.StoreName[]> = {
-  dashboard: ['accounts', 'incomes', 'expenses', 'emis', 'emiPayments', 'transfers', 'creditCards'],
+  dashboard: [
+    'accounts',
+    'incomes',
+    'expenses',
+    'emis',
+    'emiPayments',
+    'transfers',
+    'creditCards',
+    'creditCardBills',
+    'savingsGoals',
+    'recurringBills',
+    'budgetCategories',
+  ],
   accounts: ['accounts', 'transfers'],
+  'account-adjustment': [
+    'accounts',
+    'incomes',
+    'expenses',
+    'transfers',
+    'emis',
+    'emiPayments',
+  ],
   income: ['incomes', 'accounts'],
-  expenses: ['expenses', 'accounts', 'creditCards'],
+  expenses: ['expenses', 'accounts', 'creditCards', 'budgetCategories'],
   budget: ['budgetCategories', 'expenses'],
   emi: ['emis', 'emiPayments', 'accounts'],
   transfers: ['transfers', 'accounts'],
   'credit-cards': ['creditCards', 'creditCardBills', 'accounts'],
   'savings-goals': ['savingsGoals', 'accounts', 'expenses'],
-  'net-worth': ['netWorthSnapshots', 'accounts', 'emis', 'emiPayments', 'creditCards'],
+  'net-worth': [
+    'netWorthSnapshots',
+    'accounts',
+    'emis',
+    'emiPayments',
+    'creditCards',
+    'creditCardBills',
+    'incomes',
+    'expenses',
+    'transfers',
+  ],
   'recurring-bills': ['recurringBills', 'accounts'],
   'tax-saver': ['taxSavings'],
   runway: ['accounts', 'expenses', 'incomes', 'emis', 'emiPayments'],
 };
 
-export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const currentMonthInitial = new Date().toISOString().slice(0, 7);
+PAGE_STORE_MAP.all = db.STORES.filter((s) => s !== 'settings');
+
+export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const currentMonthInitial = localDate().slice(0, 7);
 
   // Clean initial state: hydrated ONLY from sanitized local cache or empty arrays.
   // Zero fabricated/dummy entries!
@@ -192,11 +253,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     () => db.getCachedStore<TaxSavingItem>('taxSavings') || []
   );
   const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(
-    () => db.getCachedStore<BudgetCategory>('budgetCategories') || db.DEFAULT_BUDGET_CATEGORIES
+    () =>
+      db.getCachedStore<BudgetCategory>('budgetCategories') ||
+      db.DEFAULT_BUDGET_CATEGORIES
   );
-  const [netWorthSnapshots, setNetWorthSnapshots] = useState<NetWorthSnapshot[]>(
-    () => db.getCachedStore<NetWorthSnapshot>('netWorthSnapshots') || []
-  );
+  const [netWorthSnapshots, setNetWorthSnapshots] = useState<
+    NetWorthSnapshot[]
+  >(() => db.getCachedStore<NetWorthSnapshot>('netWorthSnapshots') || []);
 
   const [settings, setSettings] = useState<UserSettings>(() => {
     const cached = db.getCachedStore<any>('settings');
@@ -214,7 +277,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   });
 
-  const [selectedMonth, setSelectedMonth] = useState(() => settings.activeMonth || currentMonthInitial);
+  const [selectedMonth, setSelectedMonth] = useState(
+    () => settings.activeMonth || currentMonthInitial
+  );
 
   // Loading and Sync States
   const [isLoading, setIsLoading] = useState(false);
@@ -223,8 +288,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [syncError, setSyncError] = useState<string | null>(null);
 
   // Per-store loading tracking for progressive rendering
-  const [loadingStores, setLoadingStores] = useState<Record<string, boolean>>({});
+  const [loadingStores, setLoadingStores] = useState<Record<string, boolean>>(
+    {}
+  );
   const fetchedStoresRef = useRef<Set<db.StoreName>>(new Set());
+  const mutationCount = useRef(0);
   const inFlightStoresRef = useRef<Set<db.StoreName>>(new Set());
 
   // Applies fetched sheet data directly, fully replacing state even when a sheet is empty
@@ -265,7 +333,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setTaxSavings(data);
         break;
       case 'budgetCategories':
-        setBudgetCategories(data.length > 0 ? data : db.DEFAULT_BUDGET_CATEGORIES);
+        setBudgetCategories(
+          data.length > 0 ? data : db.DEFAULT_BUDGET_CATEGORIES
+        );
         break;
       case 'netWorthSnapshots':
         setNetWorthSnapshots(data);
@@ -281,7 +351,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const isPageLoading = useCallback(
     (tab: string) => {
       const reqStores = PAGE_STORE_MAP[tab] || [];
-      return reqStores.some((s) => loadingStores[s] && !fetchedStoresRef.current.has(s));
+      return reqStores.some(
+        (s) => loadingStores[s] && !fetchedStoresRef.current.has(s)
+      );
     },
     [loadingStores]
   );
@@ -292,7 +364,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     async (page: string, force = false) => {
       const requiredStores = PAGE_STORE_MAP[page] || ['accounts', 'expenses'];
       const storesToFetch = requiredStores.filter(
-        (s) => force || (!fetchedStoresRef.current.has(s) && !inFlightStoresRef.current.has(s))
+        (s) =>
+          !inFlightStoresRef.current.has(s) &&
+          (force || !fetchedStoresRef.current.has(s))
       );
 
       if (storesToFetch.length === 0) return;
@@ -310,16 +384,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setIsSyncing(true);
       setSyncStatus('syncing');
 
+      const errors: string[] = [];
       try {
         await Promise.all(
           storesToFetch.map(async (store) => {
             try {
               const data = await db.getAllFromStore<any>(store);
               fetchedStoresRef.current.add(store);
-              // Progressively update individual state as each sheet returns
-              applyStoreData(store, data);
+              // Do not replace a form's pending mutation with an older GET.
+              if (mutationCount.current === 0) applyStoreData(store, data);
             } catch (err: any) {
-              console.warn(`[GAS] Store ${store} fetch error:`, err);
+              errors.push(`${store}: ${err.message}`);
             } finally {
               inFlightStoresRef.current.delete(store);
               setLoadingStores((prev) => ({ ...prev, [store]: false }));
@@ -327,6 +402,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           })
         );
 
+        if (errors.length) throw new Error(errors.join(' • '));
         setSyncStatus('synced');
         setSyncError(null);
       } catch (err: any) {
@@ -344,8 +420,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Refresh all stores or current active page
   const refreshAllFromDB = useCallback(async () => {
     fetchedStoresRef.current.clear();
-    inFlightStoresRef.current.clear();
-    await loadPageData('dashboard', true);
+    await loadPageData('all', true);
   }, [loadPageData]);
 
   // Derived Calculations
@@ -354,7 +429,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [emis, emiPayments, selectedMonth]);
 
   const liveBalances = useMemo(() => {
-    return calculateLiveBalances(accounts, incomes, expenses, transfers, emis, emiPayments);
+    return calculateLiveBalances(
+      accounts,
+      incomes,
+      expenses,
+      transfers,
+      emis,
+      emiPayments
+    );
   }, [accounts, incomes, expenses, transfers, emis, emiPayments]);
 
   const dashboardMetrics = useMemo(() => {
@@ -366,12 +448,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       expenses,
       emis,
       creditCards,
-      emiPayments
+      emiPayments,
+      creditCardBills
     );
-  }, [selectedMonth, accounts, liveBalances, incomes, expenses, emis, creditCards, emiPayments]);
+  }, [
+    selectedMonth,
+    accounts,
+    liveBalances,
+    incomes,
+    expenses,
+    emis,
+    creditCards,
+    emiPayments,
+    creditCardBills,
+  ]);
 
   const dueSoonItems = useMemo(() => {
-    return getDueSoonItems(expenses, emis, recurringBills, accounts, undefined, emiPayments);
+    return getDueSoonItems(
+      expenses,
+      emis,
+      recurringBills,
+      accounts,
+      undefined,
+      emiPayments
+    );
   }, [expenses, emis, recurringBills, accounts, emiPayments]);
 
   const emergencyHealth = useMemo(() => {
@@ -379,14 +479,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [savingsGoals, expenses, selectedMonth]);
 
   const taxMetrics = useMemo(() => {
-    return calculateTaxSavings(taxSavings, undefined, settings.section80cLimit, settings.section80dLimit);
+    return calculateTaxSavings(
+      taxSavings,
+      undefined,
+      settings.section80cLimit,
+      settings.section80dLimit
+    );
   }, [taxSavings, settings.section80cLimit, settings.section80dLimit]);
 
   // Helper for background mutation sync with optimistic local state
-  const runMutationWithSync = async <T,>(operation: () => Promise<T>): Promise<T> => {
+  const runMutationWithSync = async <T,>(
+    operation: () => Promise<T>
+  ): Promise<T> => {
+    mutationCount.current++;
     setIsSyncing(true);
+    setSyncStatus('syncing');
     try {
       const res = await operation();
+      for (const store of db.STORES) {
+        const confirmed = db.getCachedStore<any>(store);
+        if (confirmed) applyStoreData(store, confirmed);
+      }
       setSyncStatus('synced');
       setSyncError(null);
       return res;
@@ -394,9 +507,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       console.warn('[GAS Mutation Warning]:', err);
       setSyncStatus('error');
       setSyncError(err.message || 'Failed to sync with Google Sheets');
-      return undefined as any;
+      for (const store of db.STORES) {
+        const committed = db.getCachedStore<any>(store);
+        applyStoreData(store, committed || []);
+      }
+      throw err;
     } finally {
-      setIsSyncing(false);
+      mutationCount.current--;
+      setIsSyncing(mutationCount.current > 0);
     }
   };
 
@@ -407,9 +525,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Month navigation with persistent settings sync
   const changeSelectedMonth = async (newMonth: string) => {
     setSelectedMonth(newMonth);
-    await runMutationWithSync(() =>
-      db.putItemInStore('settings', { key: 'activeMonth', value: newMonth })
-    );
+    await db.putItemInStore('settings', {
+      key: 'activeMonth',
+      value: newMonth,
+    });
   };
 
   const prevMonth = async () => {
@@ -436,22 +555,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Mutator actions
   const updateSettings = async (newSettings: Partial<UserSettings>) => {
-    const updated = { ...settings, ...newSettings };
-    setSettings(updated);
-    await runMutationWithSync(async () => {
-      for (const [key, value] of Object.entries(newSettings)) {
-        await db.putItemInStore('settings', { key, value });
-      }
-    });
+    setSettings((current) => ({ ...current, ...newSettings }));
+    for (const [key, value] of Object.entries(newSettings)) {
+      await db.putItemInStore('settings', { key, value });
+    }
   };
 
   // Accounts
-  const addAccount = async (data: Omit<Account, 'id' | 'createdAt'> & { id?: string }): Promise<Account> => {
-    const tempId = data.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  const addAccount = async (
+    data: Omit<Account, 'id' | 'createdAt'> & { id?: string }
+  ): Promise<Account> => {
+    const tempId =
+      data.id || `acc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     let newAcc: Account = {
       ...data,
       id: tempId,
-      createdAt: new Date().toISOString().slice(0, 10),
+      createdAt: localDate(),
     };
     setAccounts((prev) => [...prev, newAcc]);
     await runMutationWithSync(async () => {
@@ -507,8 +626,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updated: Income = {
       ...target,
       status: 'Received',
-      actualAmount: target.actualAmount || target.expectedAmount,
-      actualDate: new Date().toISOString().slice(0, 10),
+      actualAmount: target.expectedAmount,
+      actualDate: localDate(),
     };
     await updateIncome(updated);
   };
@@ -546,8 +665,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updated: Expense = {
       ...target,
       status: 'Paid',
-      actualAmount: target.actualAmount || target.expectedAmount,
-      actualDate: new Date().toISOString().slice(0, 10),
+      actualAmount: target.expectedAmount,
+      actualDate: localDate(),
     };
     await updateExpense(updated);
   };
@@ -555,7 +674,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // EMIs
   const addEmi = async (data: Omit<EmiLoan, 'id'>) => {
     const tempId = `emi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const startDate = data.startDate || data.dueDate || new Date().toISOString().slice(0, 10);
+    const startDate = data.startDate || data.dueDate || localDate();
     let newEmi: EmiLoan = {
       ...data,
       id: tempId,
@@ -573,7 +692,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // If marked Paid upon creation, record the payment row for the initial month
     if (data.status === 'Paid') {
       const initialMonth = startDate.slice(0, 7) || selectedMonth;
-      await markEmiPaid(newEmi.id, initialMonth, newEmi.monthlyAmount, startDate, newEmi.accountId);
+      await markEmiPaid(
+        newEmi.id,
+        initialMonth,
+        newEmi.monthlyAmount,
+        startDate,
+        newEmi.accountId
+      );
     }
   };
 
@@ -609,8 +734,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       (p) => p.loanId === loanId && p.month === targetMonth
     );
 
-    const actualPaidAmount = paidAmount !== undefined ? paidAmount : targetLoan.monthlyAmount;
-    const actualPaidDate = paidDate || new Date().toISOString().slice(0, 10);
+    const actualPaidAmount =
+      paidAmount !== undefined ? paidAmount : targetLoan.monthlyAmount;
+    const actualPaidDate = paidDate || localDate();
     const actualAccountId = accountId || targetLoan.accountId;
 
     if (existingPayment) {
@@ -650,13 +776,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const saved = await db.putItemInStore('emiPayments', newPayment);
         if (saved && saved.id && saved.id !== tempId) {
           newPayment = saved;
-          setEmiPayments((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+          setEmiPayments((prev) =>
+            prev.map((p) => (p.id === tempId ? saved : p))
+          );
         }
       });
     }
   };
 
-  const markEmiUnpaid = async (loanId: string, targetMonth: string = selectedMonth) => {
+  const markEmiUnpaid = async (
+    loanId: string,
+    targetMonth: string = selectedMonth
+  ) => {
     const existingPayment = emiPayments.find(
       (p) => p.loanId === loanId && p.month === targetMonth
     );
@@ -698,7 +829,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateEmiPayment = async (payment: EmiPayment) => {
-    setEmiPayments((prev) => prev.map((p) => (p.id === payment.id ? payment : p)));
+    setEmiPayments((prev) =>
+      prev.map((p) => (p.id === payment.id ? payment : p))
+    );
     await runMutationWithSync(() => db.putItemInStore('emiPayments', payment));
   };
 
@@ -720,7 +853,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateTransfer = async (transfer: AccountTransfer) => {
-    setTransfers((prev) => prev.map((t) => (t.id === transfer.id ? transfer : t)));
+    setTransfers((prev) =>
+      prev.map((t) => (t.id === transfer.id ? transfer : t))
+    );
     await runMutationWithSync(() => db.putItemInStore('transfers', transfer));
   };
 
@@ -741,7 +876,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const saved = await db.putItemInStore('creditCards', newCard);
       if (saved && saved.id && saved.id !== tempId) {
         newCard = saved;
-        setCreditCards((prev) => prev.map((c) => (c.id === tempId ? saved : c)));
+        setCreditCards((prev) =>
+          prev.map((c) => (c.id === tempId ? saved : c))
+        );
       }
     });
   };
@@ -767,36 +904,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const saved = await db.putItemInStore('creditCardBills', newBill);
       if (saved && saved.id && saved.id !== tempId) {
         newBill = saved;
-        setCreditCardBills((prev) => prev.map((b) => (b.id === tempId ? saved : b)));
+        setCreditCardBills((prev) =>
+          prev.map((b) => (b.id === tempId ? saved : b))
+        );
       }
     });
   };
 
-  const payCreditCardBill = async (billId: string, fromBankAccountId: string, amount: number) => {
-    const targetBill = creditCardBills.find((b) => b.id === billId);
-    if (!targetBill) return;
-    const targetCard = creditCards.find((c) => c.id === targetBill.cardId);
-    if (!targetCard) return;
-
-    // 1. Update bill status
-    const updatedBill: CreditCardBill = {
-      ...targetBill,
-      amountPaid: amount,
-      paymentDateActual: new Date().toISOString().slice(0, 10),
-      status: amount >= targetBill.billAmount ? 'Paid' : 'Partial',
-    };
-    setCreditCardBills((prev) => prev.map((b) => (b.id === billId ? updatedBill : b)));
-    await runMutationWithSync(() => db.putItemInStore('creditCardBills', updatedBill));
-
-    // 2. Log transfer from Bank to Card Account
-    await addTransfer({
-      date: new Date().toISOString().slice(0, 10),
-      fromAccountId: fromBankAccountId,
-      toAccountId: targetCard.accountId,
-      amount,
-      reason: `Settlement for ${targetCard.name} (${targetBill.billingMonth})`,
-      status: 'Completed',
+  const payCreditCardBill = async (
+    billId: string,
+    paymentDate: string,
+    amount: number
+  ) => {
+    const bill = creditCardBills.find((b) => b.id === billId);
+    if (!bill) throw new Error('Bill not found. Refresh and try again.');
+    const updated = applyBillPayment(bill, amount, paymentDate);
+    await runMutationWithSync(async () => {
+      await db.putItemInStore('creditCardBills', updated);
+      setCreditCardBills((prev) =>
+        prev.map((b) => (b.id === billId ? updated : b))
+      );
     });
+    // A card payment is tracking-only. It never creates a bank transfer.
   };
 
   // Savings Goals
@@ -811,7 +940,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const saved = await db.putItemInStore('savingsGoals', newGoal);
       if (saved && saved.id && saved.id !== tempId) {
         newGoal = saved;
-        setSavingsGoals((prev) => prev.map((g) => (g.id === tempId ? saved : g)));
+        setSavingsGoals((prev) =>
+          prev.map((g) => (g.id === tempId ? saved : g))
+        );
       }
     });
   };
@@ -826,7 +957,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await runMutationWithSync(() => db.deleteItemFromStore('savingsGoals', id));
   };
 
-  const contributeToGoal = async (goalId: string, amount: number, fromAccountId: string) => {
+  const contributeToGoal = async (
+    goalId: string,
+    amount: number,
+    fromAccountId: string
+  ) => {
     const targetGoal = savingsGoals.find((g) => g.id === goalId);
     if (!targetGoal) return;
     const updatedGoal: SavingsGoal = {
@@ -837,11 +972,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Optional transfer to savings bank account if exists
     const emergencyAccount = accounts.find(
-      (a) => a.name.toLowerCase().includes('saving') || a.name.toLowerCase().includes('emergency')
+      (a) =>
+        a.name.toLowerCase().includes('saving') ||
+        a.name.toLowerCase().includes('emergency')
     );
     if (emergencyAccount && fromAccountId !== emergencyAccount.id) {
       await addTransfer({
-        date: new Date().toISOString().slice(0, 10),
+        date: localDate(),
         fromAccountId,
         toAccountId: emergencyAccount.id,
         amount,
@@ -863,7 +1000,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const saved = await db.putItemInStore('recurringBills', newBill);
       if (saved && saved.id && saved.id !== tempId) {
         newBill = saved;
-        setRecurringBills((prev) => prev.map((b) => (b.id === tempId ? saved : b)));
+        setRecurringBills((prev) =>
+          prev.map((b) => (b.id === tempId ? saved : b))
+        );
       }
     });
   };
@@ -875,22 +1014,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const deleteRecurringBill = async (id: string) => {
     setRecurringBills((prev) => prev.filter((b) => b.id !== id));
-    await runMutationWithSync(() => db.deleteItemFromStore('recurringBills', id));
+    await runMutationWithSync(() =>
+      db.deleteItemFromStore('recurringBills', id)
+    );
   };
 
   const markRecurringBillPaid = async (billId: string) => {
     const bill = recurringBills.find((b) => b.id === billId);
     if (!bill) return;
 
-    const d = new Date(bill.nextRenewalDate);
-    if (bill.frequency === 'Yearly') {
-      d.setFullYear(d.getFullYear() + 1);
-    } else {
-      d.setMonth(d.getMonth() + 1);
-    }
     const updated: RecurringBill = {
       ...bill,
-      nextRenewalDate: d.toISOString().slice(0, 10),
+      nextRenewalDate: addMonthsClamped(
+        bill.nextRenewalDate,
+        bill.frequency === 'Yearly'
+          ? 12
+          : bill.frequency === 'Quarterly'
+            ? 3
+            : 1
+      ),
     };
     await updateRecurringBill(updated);
   };
@@ -923,12 +1065,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   // Budgets
-  const updateBudgetCategoryLimit = async (categoryName: string, limit: number) => {
+  const updateBudgetCategoryLimit = async (
+    categoryName: string,
+    limit: number
+  ) => {
     const existing = budgetCategories.find((b) => b.category === categoryName);
     if (existing) {
       const updated: BudgetCategory = { ...existing, monthlyLimit: limit };
-      setBudgetCategories((prev) => prev.map((b) => (b.id === existing.id ? updated : b)));
-      await runMutationWithSync(() => db.putItemInStore('budgetCategories', updated));
+      setBudgetCategories((prev) =>
+        prev.map((b) => (b.id === existing.id ? updated : b))
+      );
+      await runMutationWithSync(() =>
+        db.putItemInStore('budgetCategories', updated)
+      );
     } else {
       const newCat: BudgetCategory = {
         id: `b-${Date.now()}`,
@@ -936,7 +1085,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         monthlyLimit: limit,
       };
       setBudgetCategories((prev) => [...prev, newCat]);
-      await runMutationWithSync(() => db.putItemInStore('budgetCategories', newCat));
+      await runMutationWithSync(() =>
+        db.putItemInStore('budgetCategories', newCat)
+      );
     }
   };
 
@@ -954,16 +1105,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const totalAssets = liquidTotal + cashTotal + investTotal;
 
-    const emiPrincipal = emis.reduce((sum, e) => sum + e.outstandingPrincipal, 0);
+    const emiPrincipal = emis.reduce(
+      (sum, e) => sum + outstandingPrincipal(e),
+      0
+    );
     const creditCardsDebt = dashboardMetrics.totalCardOutstanding;
     const totalLiabilities = emiPrincipal + creditCardsDebt;
 
     const netWorth = totalAssets - totalLiabilities;
 
     const snapshot: NetWorthSnapshot = {
-      id: `nw-${Date.now()}`,
+      id:
+        netWorthSnapshots.find((p) => p.month === selectedMonth)?.id ||
+        `nw-${selectedMonth}`,
       month: selectedMonth,
-      date: new Date().toISOString().slice(0, 10),
+      date: localDate(),
       totalAssets,
       totalLiabilities,
       netWorth,
@@ -980,9 +1136,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setNetWorthSnapshots((prev) => {
       const filtered = prev.filter((p) => p.month !== selectedMonth);
-      return [...filtered, snapshot].sort((a, b) => a.month.localeCompare(b.month));
+      return [...filtered, snapshot].sort((a, b) =>
+        a.month.localeCompare(b.month)
+      );
     });
-    await runMutationWithSync(() => db.putItemInStore('netWorthSnapshots', snapshot));
+    await runMutationWithSync(() =>
+      db.putItemInStore('netWorthSnapshots', snapshot)
+    );
   };
 
   // Presets & Backups

@@ -1,3 +1,4 @@
+import { localDate } from '../../services/financeRules';
 import React, { useState } from 'react';
 import { GlassModal } from '../ui/GlassModal';
 import { GlassDatePicker } from '../ui/GlassDatePicker';
@@ -15,7 +16,7 @@ export const AddRecurringBillModal: React.FC<AddRecurringBillModalProps> = ({
 }) => {
   const { accounts, budgetCategories, addRecurringBill, settings } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<BillFrequency>('Monthly');

@@ -42,7 +42,24 @@ export interface Expense {
 
 export type EmiStatus = 'Pending' | 'Paid' | 'Overdue';
 
+export interface LoanEvent {
+  id: string;
+  kind: 'Foreclosure' | 'Part-payment';
+  date: string;
+  amount: number;
+  accountId: string;
+  note: string;
+  revisedPrincipal?: number;
+  previousPrincipal: number;
+  previousMonthlyAmount: number;
+  previousTotalInstallments?: number | null;
+}
+
 export interface EmiLoan {
+  lifecycle?: 'Active' | 'Closed';
+  closureDate?: string;
+  settlementAmount?: number;
+  loanEvents?: LoanEvent[];
   id: string;
   loanName: string;
   lender: string;
@@ -113,6 +130,7 @@ export interface CreditCard {
 export type CreditCardBillStatus = 'Paid' | 'Partial' | 'Pending' | 'Overdue';
 
 export interface CreditCardBill {
+  payments?: { id: string; date: string; amount: number }[];
   id: string;
   cardId: string;
   billingMonth: string; // YYYY-MM
@@ -139,6 +157,8 @@ export interface SavingsGoal {
 export type BillFrequency = 'Monthly' | 'Quarterly' | 'Yearly';
 
 export interface RecurringBill {
+  templateEnabled?: boolean;
+  entryKind?: 'Income' | 'Expense';
   id: string;
   name: string;
   amount: number;

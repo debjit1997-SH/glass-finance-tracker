@@ -24,3 +24,10 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Local UI test output
+artifacts/
+
+.env
+.env.*
+!.env.example

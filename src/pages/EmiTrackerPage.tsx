@@ -1,3 +1,6 @@
+import { localDate } from '../services/financeRules';
+import { LoanLifecyclePanel } from '../components/LoanLifecyclePanel';
+import { outstandingPrincipal } from '../services/financeRules';
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -46,11 +49,11 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
   const [extraPayment, setExtraPayment] = useState<string>('0');
   const [editingEmi, setEditingEmi] = useState<EmiLoan | null>(null);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
 
   // Top totals for selected month
   const totalMonthlyEmi = monthlyEmiInstances.reduce((sum, inst) => sum + inst.amount, 0);
-  const totalPrincipal = emis.reduce((sum, e) => sum + e.outstandingPrincipal, 0);
+  const totalPrincipal = emis.reduce((sum, e) => sum + outstandingPrincipal(e), 0);
   const activeLoansCount = monthlyEmiInstances.length;
 
   const accountMap = new Map<string, string>();
@@ -58,7 +61,7 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
 
   // Debt Payoff Simulation
   const payoffResults = useMemo(() => {
-    return calculateDebtPayoff(emis, parseFloat(extraPayment || '0'));
+    return calculateDebtPayoff(emis.filter(e => e.lifecycle !== 'Closed'), parseFloat(extraPayment || '0'));
   }, [emis, extraPayment]);
 
   const activePlan =
@@ -95,6 +98,7 @@ export const EmiTrackerPage: React.FC<EmiTrackerPageProps> = ({ onOpenAddEmi }) 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
+      <LoanLifecyclePanel />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

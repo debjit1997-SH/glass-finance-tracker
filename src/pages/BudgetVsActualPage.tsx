@@ -66,7 +66,7 @@ export const BudgetVsActualPage: React.FC = () => {
       .filter((e) => e.date.startsWith(selectedMonth) && e.status === 'Paid')
       .forEach((e) => {
         const current = map.get(e.category) || 0;
-        map.set(e.category, current + (e.actualAmount || e.expectedAmount));
+        map.set(e.category, current + (e.actualAmount ?? e.expectedAmount));
       });
 
     return map;
@@ -110,7 +110,7 @@ export const BudgetVsActualPage: React.FC = () => {
       budgetCategories.forEach((cat) => {
         const catSpent = paidInMonth
           .filter((e) => e.category === cat.category)
-          .reduce((sum, e) => sum + (e.actualAmount || e.expectedAmount), 0);
+          .reduce((sum, e) => sum + (e.actualAmount ?? e.expectedAmount), 0);
         entry[cat.category] = catSpent;
       });
 

@@ -1,3 +1,4 @@
+import { localDate, financialYearForDate } from './financeRules';
 import {
   Account,
   Income,
@@ -16,9 +17,7 @@ import {
   UserSettings,
 } from '../types/finance';
 
-export const GAS_WEB_APP_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GAS_WEB_APP_URL as string) ||
-  'https://script.google.com/macros/s/AKfycbz1JD24-hIfPuqo6nQdxtxeOUI3hqH3D4t9vGAMTCmawEmRKc75xqfcgFtOGaqGtpMAuw/exec';
+export const GAS_WEB_APP_URL = '/api/sheets';
 
 export const STORES = [
   'accounts',
@@ -134,7 +133,9 @@ export function purgeAllSampleDataFromLocalStorage(): void {
       if (raw) {
         const items = JSON.parse(raw);
         if (Array.isArray(items)) {
-          const cleaned = items.filter((i) => !i?.id || !SAMPLE_IDS.has(String(i.id)));
+          const cleaned = items.filter(
+            (i) => !i?.id || !SAMPLE_IDS.has(String(i.id))
+          );
           if (cleaned.length !== items.length) {
             localStorage.setItem(key, JSON.stringify(cleaned));
           }
@@ -146,10 +147,7 @@ export function purgeAllSampleDataFromLocalStorage(): void {
   }
 }
 
-// Auto-run cache sanitation immediately on module load
-if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-  purgeAllSampleDataFromLocalStorage();
-}
+// Existing caches are never purged automatically.
 
 /**
  * Local storage caching helper for offline resilience and instant rendering
@@ -162,9 +160,12 @@ export function getCachedStore<T>(storeName: StoreName): T[] | null {
     if (raw) {
       const parsed: any[] = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        const cleaned = parsed.filter((item) => !item?.id || !SAMPLE_IDS.has(String(item.id)));
+        const cleaned = parsed;
         if (cleaned.length !== parsed.length) {
-          localStorage.setItem(`gas_cache_${storeName}`, JSON.stringify(cleaned));
+          localStorage.setItem(
+            `gas_cache_${storeName}`,
+            JSON.stringify(cleaned)
+          );
         }
         return cleaned as T[];
       }
@@ -179,9 +180,7 @@ export function setCachedStore<T>(storeName: StoreName, items: T[]) {
   if (typeof localStorage === 'undefined') return;
   try {
     // Never persist sample entries
-    const safeItems = Array.isArray(items)
-      ? items.filter((item: any) => !item?.id || !SAMPLE_IDS.has(String(item.id)))
-      : items;
+    const safeItems = Array.isArray(items) ? items : items;
     localStorage.setItem(`gas_cache_${storeName}`, JSON.stringify(safeItems));
   } catch {
     // ignore
@@ -231,7 +230,10 @@ function parseNumber(val: any, fallback = 0): number {
  * Explicit Bi-directional Mapping: Entity -> Exact Google Sheet Header Row
  * Google Apps Script looks up row[headerName] case-sensitively.
  */
-export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<string, any> {
+export function mapEntityToSheetRow(
+  storeName: StoreName,
+  entity: any
+): Record<string, any> {
   if (!entity || typeof entity !== 'object') return entity;
 
   switch (storeName) {
@@ -241,7 +243,10 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         Name: String(entity.name || ''),
         Type: String(entity.type || 'bank'),
         OpeningBalance: parseNumber(entity.openingBalance, 0),
-        Notes: String(entity.notes || ''),
+        color: entity.color,
+        accountNumberLast4: entity.accountNumberLast4 || '',
+        isArchived: Boolean(entity.isArchived),
+        createdAt: entity.createdAt,
       };
 
     case 'incomes':
@@ -284,7 +289,13 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         Status: String(entity.status || 'Pending'),
         Notes: String(entity.notes || ''),
         StartDate: formatDateString(entity.startDate || entity.dueDate),
-        TotalInstallments: entity.totalInstallments ? parseNumber(entity.totalInstallments, 0) : '',
+        TotalInstallments: entity.totalInstallments
+          ? parseNumber(entity.totalInstallments, 0)
+          : '',
+        Lifecycle: entity.lifecycle || 'Active',
+        ClosureDate: entity.closureDate || '',
+        SettlementAmount: entity.settlementAmount ?? '',
+        LoanEvents: JSON.stringify(entity.loanEvents || []),
       };
 
     case 'emiPayments':
@@ -320,7 +331,9 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         CurrentUnbilled: parseNumber(entity.currentUnbilled, 0),
         StatementDate: entity.statementDay ? String(entity.statementDay) : '',
         PaymentDueDate: entity.dueDay ? String(entity.dueDay) : '',
-        Notes: entity.bank ? `Bank: ${entity.bank}` : '',
+        bank: entity.bank || '',
+        accountId: entity.accountId || '',
+        color: entity.color || 'indigo',
       };
 
     case 'creditCardBills':
@@ -331,10 +344,11 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         StatementDate: formatDateString(entity.statementDate),
         BillAmount: parseNumber(entity.billAmount, 0),
         AmountPaid: parseNumber(entity.amountPaid, 0),
+        PaymentHistory: JSON.stringify(entity.payments || []),
         PaymentDueDate: formatDateString(entity.paymentDueDate),
         PaymentDateActual: formatDateString(entity.paymentDateActual),
         Status: String(entity.status || 'Pending'),
-        Notes: String(entity.notes || ''),
+        ...(entity.notes !== undefined ? { Notes: String(entity.notes) } : {}),
       };
 
     case 'savingsGoals':
@@ -344,6 +358,9 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         TargetAmount: parseNumber(entity.targetAmount, 0),
         TargetDate: formatDateString(entity.targetDate),
         CurrentSaved: parseNumber(entity.currentSaved, 0),
+        category: entity.category || 'General',
+        icon: entity.icon || 'Target',
+        color: entity.color || 'blue',
         Notes: String(entity.notes || ''),
       };
 
@@ -353,6 +370,9 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         Name: String(entity.name || ''),
         Amount: parseNumber(entity.amount, 0),
         Frequency: String(entity.frequency || 'Monthly'),
+        autoRenew: Boolean(entity.autoRenew),
+        TemplateEnabled: Boolean(entity.templateEnabled),
+        EntryKind: entity.entryKind || 'Expense',
         NextRenewalDate: formatDateString(entity.nextRenewalDate),
         Category: String(entity.category || ''),
         Account: String(entity.accountId || ''),
@@ -364,6 +384,9 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         id: String(entity.id || ''),
         Name: String(entity.name || ''),
         Section: String(entity.section || '80C'),
+        financialYear:
+          entity.financialYear || financialYearForDate(entity.date),
+        Notes: entity.notes || '',
         Amount: parseNumber(entity.amount, 0),
         Date: formatDateString(entity.date),
       };
@@ -373,7 +396,7 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         id: String(entity.id || ''),
         Category: String(entity.category || ''),
         MonthlyBudget: parseNumber(entity.monthlyLimit, 0),
-        Month: String(entity.month || new Date().toISOString().slice(0, 7)),
+        // Existing Month column is preserved from the source row.
       };
 
     case 'netWorthSnapshots':
@@ -383,6 +406,9 @@ export function mapEntityToSheetRow(storeName: StoreName, entity: any): Record<s
         TotalAssets: parseNumber(entity.totalAssets, 0),
         TotalLiabilities: parseNumber(entity.totalLiabilities, 0),
         NetWorth: parseNumber(entity.netWorth, 0),
+        month: entity.month,
+        assetBreakdown: entity.assetBreakdown,
+        liabilityBreakdown: entity.liabilityBreakdown,
       };
 
     default:
@@ -402,7 +428,10 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         id: String(row.id || ''),
         name: String(row.Name ?? row.name ?? 'Account'),
         type: (row.Type ?? row.type ?? 'bank').toLowerCase() as any,
-        openingBalance: parseNumber(row.OpeningBalance ?? row.openingBalance, 0),
+        openingBalance: parseNumber(
+          row.OpeningBalance ?? row.openingBalance,
+          0
+        ),
         color: row.color || '#3b82f6',
         accountNumberLast4: row.accountNumberLast4 || '',
         isArchived: row.isArchived === true || row.isArchived === 'true',
@@ -414,9 +443,12 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
     case 'incomes': {
       const res: Income = {
         id: String(row.id || ''),
-        date: formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10),
+        date: formatDateString(row.Date ?? row.date) || localDate(),
         source: String(row.Source ?? row.source ?? ''),
-        expectedAmount: parseNumber(row.ExpectedAmount ?? row.expectedAmount, 0),
+        expectedAmount: parseNumber(
+          row.ExpectedAmount ?? row.expectedAmount,
+          0
+        ),
         actualAmount: parseNumber(row.ActualAmount ?? row.actualAmount, 0),
         accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
         actualDate: formatDateString(row.ActualDate ?? row.actualDate),
@@ -429,10 +461,13 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
     case 'expenses': {
       const res: Expense = {
         id: String(row.id || ''),
-        date: formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10),
+        date: formatDateString(row.Date ?? row.date) || localDate(),
         name: String(row.Name ?? row.name ?? ''),
         category: String(row.Category ?? row.category ?? 'Miscellaneous'),
-        expectedAmount: parseNumber(row.ExpectedAmount ?? row.expectedAmount ?? row.amount, 0),
+        expectedAmount: parseNumber(
+          row.ExpectedAmount ?? row.expectedAmount ?? row.amount,
+          0
+        ),
         actualAmount: parseNumber(row.ActualAmount ?? row.actualAmount, 0),
         accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
         actualDate: formatDateString(row.ActualDate ?? row.actualDate),
@@ -457,14 +492,22 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         loanName: String(row.LoanName ?? row.loanName ?? ''),
         lender: String(row.Lender ?? row.lender ?? ''),
         monthlyAmount: parseNumber(row.MonthlyAmount ?? row.monthlyAmount, 0),
-        outstandingPrincipal: parseNumber(row.OutstandingPrincipal ?? row.outstandingPrincipal, 0),
+        outstandingPrincipal: parseNumber(
+          row.OutstandingPrincipal ?? row.outstandingPrincipal,
+          0
+        ),
         interestRate: parseNumber(row.InterestRate ?? row.interestRate, 0),
         dueDate: dueDate,
         accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
         status: (row.Status ?? row.status ?? 'Pending') as any,
         notes: String(row.Notes ?? row.notes ?? ''),
         startDate: startDate,
-        totalInstallments: totalInstallments && totalInstallments > 0 ? totalInstallments : null,
+        totalInstallments:
+          totalInstallments && totalInstallments > 0 ? totalInstallments : null,
+        lifecycle: row.Lifecycle === 'Closed' ? 'Closed' : 'Active',
+        closureDate: formatDateString(row.ClosureDate),
+        settlementAmount: parseNumber(row.SettlementAmount),
+        loanEvents: parseArray(row.LoanEvents),
       };
       return res as unknown as T;
     }
@@ -487,9 +530,13 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
     case 'transfers': {
       const res: AccountTransfer = {
         id: String(row.id || ''),
-        date: formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10),
-        fromAccountId: String(row.FromAccount ?? row.fromAccountId ?? row.fromAccount ?? ''),
-        toAccountId: String(row.ToAccount ?? row.toAccountId ?? row.toAccount ?? ''),
+        date: formatDateString(row.Date ?? row.date) || localDate(),
+        fromAccountId: String(
+          row.FromAccount ?? row.fromAccountId ?? row.fromAccount ?? ''
+        ),
+        toAccountId: String(
+          row.ToAccount ?? row.toAccountId ?? row.toAccount ?? ''
+        ),
         amount: parseNumber(row.Amount ?? row.amount, 0),
         reason: String(row.Reason ?? row.reason ?? ''),
         status: (row.Status ?? row.status ?? 'Completed') as any,
@@ -507,7 +554,10 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
       const rawStmt = row.StatementDate ?? row.statementDay;
       const rawDue = row.PaymentDueDate ?? row.dueDay;
       const stmtDay = rawStmt
-        ? parseNumber(rawStmt, parseInt(String(rawStmt).split('-').pop() || '1'))
+        ? parseNumber(
+            rawStmt,
+            parseInt(String(rawStmt).split('-').pop() || '1')
+          )
         : 1;
       const dueDay = rawDue
         ? parseNumber(rawDue, parseInt(String(rawDue).split('-').pop() || '1'))
@@ -518,7 +568,10 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         name: String(row.CardName ?? row.name ?? 'Credit Card'),
         bank: rawBank,
         limit: parseNumber(row.CreditLimit ?? row.limit, 0),
-        currentUnbilled: parseNumber(row.CurrentUnbilled ?? row.currentUnbilled, 0),
+        currentUnbilled: parseNumber(
+          row.CurrentUnbilled ?? row.currentUnbilled,
+          0
+        ),
         accountId: String(row.accountId || ''),
         color: row.color || 'purple',
         statementDay: stmtDay || 1,
@@ -535,8 +588,13 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         statementDate: formatDateString(row.StatementDate ?? row.statementDate),
         billAmount: parseNumber(row.BillAmount ?? row.billAmount, 0),
         amountPaid: parseNumber(row.AmountPaid ?? row.amountPaid, 0),
-        paymentDueDate: formatDateString(row.PaymentDueDate ?? row.paymentDueDate),
-        paymentDateActual: formatDateString(row.PaymentDateActual ?? row.paymentDateActual),
+        payments: parseArray(row.PaymentHistory),
+        paymentDueDate: formatDateString(
+          row.PaymentDueDate ?? row.paymentDueDate
+        ),
+        paymentDateActual: formatDateString(
+          row.PaymentDateActual ?? row.paymentDateActual
+        ),
         status: (row.Status ?? row.status ?? 'Pending') as any,
       };
       return res as unknown as T;
@@ -563,10 +621,15 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         name: String(row.Name ?? row.name ?? ''),
         amount: parseNumber(row.Amount ?? row.amount, 0),
         frequency: (row.Frequency ?? row.frequency ?? 'Monthly') as any,
-        nextRenewalDate: formatDateString(row.NextRenewalDate ?? row.nextRenewalDate),
+        nextRenewalDate: formatDateString(
+          row.NextRenewalDate ?? row.nextRenewalDate
+        ),
         category: String(row.Category ?? row.category ?? ''),
         accountId: String(row.Account ?? row.accountId ?? row.account ?? ''),
         autoRenew: row.autoRenew === true || row.autoRenew === 'true',
+        templateEnabled:
+          row.TemplateEnabled === true || row.TemplateEnabled === 'true',
+        entryKind: row.EntryKind === 'Income' ? 'Income' : 'Expense',
         notes: String(row.Notes ?? row.notes ?? ''),
       };
       return res as unknown as T;
@@ -579,7 +642,10 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         section: (row.Section ?? row.section ?? '80C') as any,
         amount: parseNumber(row.Amount ?? row.amount, 0),
         date: formatDateString(row.Date ?? row.date),
-        financialYear: String(row.financialYear || '2026-2027'),
+        financialYear: String(
+          row.financialYear ||
+            financialYearForDate(formatDateString(row.Date ?? row.date))
+        ),
         notes: String(row.Notes ?? row.notes ?? ''),
       };
       return res as unknown as T;
@@ -589,14 +655,17 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
       const res: BudgetCategory = {
         id: String(row.id || `b-${Date.now()}`),
         category: String(row.Category ?? row.category ?? ''),
-        monthlyLimit: parseNumber(row.MonthlyBudget ?? row.monthlyBudget ?? row.monthlyLimit, 0),
+        monthlyLimit: parseNumber(
+          row.MonthlyBudget ?? row.monthlyBudget ?? row.monthlyLimit,
+          0
+        ),
         color: row.color,
       };
       return res as unknown as T;
     }
 
     case 'netWorthSnapshots': {
-      const dateStr = formatDateString(row.Date ?? row.date) || new Date().toISOString().slice(0, 10);
+      const dateStr = formatDateString(row.Date ?? row.date) || localDate();
       let assetBreakdown = { liquidAccounts: 0, investments: 0, cash: 0 };
       let liabilityBreakdown = { emiPrincipal: 0, creditCards: 0 };
 
@@ -616,16 +685,22 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
         } catch {
           // ignore
         }
-      } else if (row.liabilityBreakdown && typeof row.liabilityBreakdown === 'object') {
+      } else if (
+        row.liabilityBreakdown &&
+        typeof row.liabilityBreakdown === 'object'
+      ) {
         liabilityBreakdown = row.liabilityBreakdown;
       }
 
       const res: NetWorthSnapshot = {
         id: String(row.id || ''),
         date: dateStr,
-        month: dateStr.slice(0, 7),
+        month: row.month || dateStr.slice(0, 7),
         totalAssets: parseNumber(row.TotalAssets ?? row.totalAssets, 0),
-        totalLiabilities: parseNumber(row.TotalLiabilities ?? row.totalLiabilities, 0),
+        totalLiabilities: parseNumber(
+          row.TotalLiabilities ?? row.totalLiabilities,
+          0
+        ),
         netWorth: parseNumber(row.NetWorth ?? row.netWorth, 0),
         assetBreakdown,
         liabilityBreakdown,
@@ -642,7 +717,10 @@ export function mapSheetRowToEntity<T>(storeName: StoreName, row: any): T {
  * Calls Google Apps Script Web App: GET ?sheet=SheetName
  * Includes a 15s AbortController timeout to handle Google Apps Script cold-starts
  */
-export async function apiGet<T>(sheetName: string, timeoutMs: number = 15000): Promise<T[]> {
+export async function apiGet<T>(
+  sheetName: string,
+  timeoutMs: number = 15000
+): Promise<T[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
@@ -657,22 +735,27 @@ export async function apiGet<T>(sheetName: string, timeoutMs: number = 15000): P
       },
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok && response.status !== 0) {
       if (response.status === 401 || response.status === 403) {
         throw new Error(
-          "Google Apps Script requires authorization. In the Apps Script editor, open Deploy > Manage deployments > Edit > Who has access, set to 'Anyone', then click Deploy."
+          'Google Apps Script denied access. Check the configured deployment and access controls.'
         );
       }
-      throw new Error(`Google Apps Script GET failed with HTTP ${response.status}`);
+      throw new Error(
+        `Google Apps Script GET failed with HTTP ${response.status}`
+      );
     }
 
     const text = await response.text();
+    clearTimeout(timeoutId);
     // Detect HTML sign-in page returned when Apps Script deployment is restricted
-    if (text.trim().startsWith('<!doctype') || text.includes('accounts.google.com')) {
+    if (
+      text.trim().startsWith('<!doctype') ||
+      text.includes('accounts.google.com')
+    ) {
       throw new Error(
-        "Google Apps Script access is restricted. Please deploy the Web App with 'Who has access' set to 'Anyone' in the Apps Script editor."
+        'Google Apps Script returned a sign-in page instead of records. Check the deployment and access controls.'
       );
     }
 
@@ -685,19 +768,29 @@ export async function apiGet<T>(sheetName: string, timeoutMs: number = 15000): P
         if (Array.isArray((data as any).data)) {
           return (data as any).data;
         }
-        if ((data as any).error && String((data as any).error).includes('Sheet not found')) {
-          console.info(`[GAS] Sheet not yet created: ${sheetName}, using local storage`);
-          return [];
+        if (
+          (data as any).error &&
+          String((data as any).error).includes('Sheet not found')
+        ) {
+          throw new Error(
+            `Missing sheet: ${sheetName}. No records were changed.`
+          );
         }
       }
-      return [];
+      throw new Error(
+        (data as any)?.error || `Unexpected response for ${sheetName}`
+      );
     } catch (err: any) {
-      throw new Error(`Invalid JSON from Google Apps Script (${sheetName}): ${err.message}`);
+      throw new Error(
+        `Invalid JSON from Google Apps Script (${sheetName}): ${err.message}`
+      );
     }
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      console.warn(`[GAS] GET ${sheetName} timed out after ${timeoutMs}ms, falling back to cache`);
+      console.warn(
+        `[GAS] GET ${sheetName} timed out after ${timeoutMs}ms, falling back to cache`
+      );
     }
     throw err;
   }
@@ -711,16 +804,24 @@ export async function apiMutate(
   sheetName: string,
   action: 'create' | 'update' | 'delete',
   row?: any,
-  id?: string
+  id?: string,
+  options: { expectedRevision?: string; createOnly?: boolean } = {}
 ): Promise<any> {
+  if (import.meta.env?.VITE_ENABLE_UPGRADE_WRITES !== 'true') {
+    throw new Error(
+      'Read-only preview: saving is locked until the Apps Script schema and a full Sheet backup are verified.'
+    );
+  }
   const payload = {
     sheet: sheetName,
+    ...options,
     action,
     row: row ? serializeRow(row) : undefined,
     id: id || (row && row.id ? String(row.id) : undefined),
   };
 
   const response = await fetch(GAS_WEB_APP_URL, {
+    signal: AbortSignal.timeout(30000),
     method: 'POST',
     headers: {
       'Content-Type': 'text/plain;charset=utf-8',
@@ -731,29 +832,40 @@ export async function apiMutate(
   if (!response.ok && response.status !== 0) {
     if (response.status === 401 || response.status === 403) {
       throw new Error(
-        "Google Apps Script requires authorization. In Apps Script, set 'Who has access' to 'Anyone'."
+        'Google Apps Script denied this operation. Check access controls.'
       );
     }
-    throw new Error(`Google Apps Script POST failed with HTTP ${response.status}`);
-  }
-
-  const text = await response.text();
-  if (text.trim().startsWith('<!doctype') || text.includes('accounts.google.com')) {
+    const failure = await response.json().catch(() => ({}));
     throw new Error(
-      "Google Apps Script access is restricted. Please deploy the Web App with 'Who has access: Anyone'."
+      failure.error || `Save failed with HTTP ${response.status}`
     );
   }
 
-  try {
-    const parsed = text ? JSON.parse(text) : { success: true };
-    if (parsed && parsed.error && String(parsed.error).includes('Sheet not found')) {
-      console.warn(`[GAS] Sheet not yet created: ${sheetName}. Mutation saved to local cache only.`);
-      return { success: true, localOnly: true };
-    }
-    return parsed;
-  } catch {
-    return { success: true, raw: text };
+  const text = await response.text();
+  if (
+    text.trim().startsWith('<!doctype') ||
+    text.includes('accounts.google.com')
+  ) {
+    throw new Error(
+      'Google Apps Script returned a sign-in page. Save is unconfirmed.'
+    );
   }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      'Save confirmation was invalid. Refresh and check the record before retrying.'
+    );
+  }
+  if (!parsed || parsed.error || parsed.success !== true || parsed.localOnly) {
+    throw new Error(
+      parsed?.error ||
+        'Google Sheets did not confirm this save. Refresh before retrying.'
+    );
+  }
+  return parsed;
 }
 
 /**
@@ -762,7 +874,11 @@ export async function apiMutate(
 function serializeRow(row: any): any {
   const copy = { ...row };
   for (const [key, value] of Object.entries(copy)) {
-    if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+    if (
+      value !== null &&
+      typeof value === 'object' &&
+      !(value instanceof Date)
+    ) {
       copy[key] = JSON.stringify(value);
     }
   }
@@ -773,6 +889,8 @@ function serializeRow(row: any): any {
 // Unified Store API (Replaces IndexedDB with Google Apps Script)
 // -------------------------------------------------------------
 
+const storeRevision = new Map<StoreName, number>();
+
 export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
   if (storeName === 'settings') {
     const cached = getCachedStore<T>('settings');
@@ -780,36 +898,43 @@ export async function getAllFromStore<T>(storeName: StoreName): Promise<T[]> {
   }
 
   const sheetName = SHEET_NAMES[storeName] || storeName;
+  const revision = storeRevision.get(storeName) || 0;
 
   try {
     const rawRows = await apiGet<any>(sheetName);
     // Eliminate blank/empty/corrupted rows from Google Sheets
-    const nonEmpty = rawRows.filter((r) => !isRowEmpty(r));
-    const entities = nonEmpty.map((r) => mapSheetRowToEntity<T>(storeName, r));
+    const nonEmpty = rawRows
+      .filter((r) => !isRowEmpty(r))
+      .filter((r) => {
+        const isBill = Boolean(
+          r.BillingMonth ||
+          r.billingMonth ||
+          String(r.id || '').startsWith('ccb-')
+        );
+        if (storeName === 'creditCards') return !isBill;
+        if (storeName === 'creditCardBills') return isBill;
+        return true;
+      });
+    const entities = nonEmpty.map((r) => ({
+      ...mapSheetRowToEntity<T>(storeName, r),
+      _revision: r._revision,
+    }));
 
-    // Provide default categories if Budget vs Actual has no rows yet
-    if (storeName === 'budgetCategories' && entities.length === 0) {
-      const cached = getCachedStore<T>(storeName);
-      if (cached && cached.length > 0) return cached;
-      return DEFAULT_BUDGET_CATEGORIES as unknown as T[];
-    }
-
+    if ((storeRevision.get(storeName) || 0) !== revision)
+      return getCachedStore<T>(storeName) || entities;
     setCachedStore(storeName, entities);
     return entities;
   } catch (err) {
-    console.warn(`[GAS] Error fetching ${sheetName}, checking local cache:`, err);
-    const cached = getCachedStore<T>(storeName);
-    if (cached && cached.length > 0) {
-      return cached;
-    }
-    if (storeName === 'budgetCategories') {
-      return DEFAULT_BUDGET_CATEGORIES as unknown as T[];
-    }
-    return [];
+    // Keep the last confirmed data visible, but never report a failed read as synced.
+    throw err;
   }
 }
 
-export async function putItemInStore<T>(storeName: StoreName, item: T): Promise<T> {
+export async function putItemInStore<T>(
+  storeName: StoreName,
+  item: T,
+  createOnly = false
+): Promise<T> {
   const sheetName = SHEET_NAMES[storeName] || storeName;
   const anyItem = item as any;
   const id = anyItem.id || anyItem.key;
@@ -824,95 +949,84 @@ export async function putItemInStore<T>(storeName: StoreName, item: T): Promise<
     } as any;
   }
 
-  // Optimistically update local cache with clean frontend entity
   const cached = getCachedStore<any>(storeName) || [];
-  const index = cached.findIndex((i) => (i.id && i.id === id) || (i.key && i.key === id));
-  if (index >= 0) {
-    cached[index] = entityToSave;
-  } else {
-    cached.push(entityToSave);
+  if (storeName !== 'settings') {
+    // Read before writing; preserve columns unknown to this client.
+    const rows = await apiGet<any>(sheetName);
+    const existing = rows.find((r) => String(r.id || r.key) === String(id));
+    if (existing && createOnly)
+      return mapSheetRowToEntity<T>(storeName, existing);
+    const previous = cached.find((i) => (i.id || i.key) === id);
+    const expectedRevision = anyItem._revision || previous?._revision;
+    if (
+      existing &&
+      (!expectedRevision || existing._revision !== expectedRevision)
+    )
+      throw new Error(
+        'This record changed or has no verified revision. Refresh before saving.'
+      );
+    const sheetRow = mapEntityToSheetRow(storeName, entityToSave);
+    const res = await apiMutate(
+      sheetName,
+      existing ? 'update' : 'create',
+      sheetRow,
+      id,
+      { expectedRevision, createOnly }
+    );
+    if (res.row)
+      entityToSave = {
+        ...mapSheetRowToEntity<any>(storeName, res.row),
+        _revision: res.revision,
+      };
+    else entityToSave._revision = res.revision;
+    if (res.id && String(res.id) !== String(id))
+      entityToSave.id = String(res.id);
   }
+  const index = cached.findIndex((i) => (i.id || i.key) === id);
+  if (index >= 0) cached[index] = entityToSave;
+  else cached.push(entityToSave);
+  storeRevision.set(storeName, (storeRevision.get(storeName) || 0) + 1);
   setCachedStore(storeName, cached);
-
-  if (storeName === 'settings') {
-    return entityToSave as T;
-  }
-
-  // Explicitly map frontend entity to exact Google Sheet header names
-  const sheetRow = mapEntityToSheetRow(storeName, entityToSave);
-  const action = index >= 0 ? 'update' : 'create';
-  const res = await apiMutate(sheetName, action, sheetRow, id);
-
-  // If GAS returned a generated UUID for create, update local cache and entity ID
-  if (action === 'create' && res && res.id && res.id !== id) {
-    const assignedId = String(res.id);
-    entityToSave.id = assignedId;
-    const finalCached = getCachedStore<any>(storeName) || [];
-    const itemIdx = finalCached.findIndex((i) => i.id === id);
-    if (itemIdx >= 0) {
-      finalCached[itemIdx] = { ...finalCached[itemIdx], id: assignedId };
-      setCachedStore(storeName, finalCached);
-    }
-  }
-
   return entityToSave as T;
 }
 
-export async function putItemsInStore<T>(storeName: StoreName, items: T[]): Promise<void> {
-  if (!items || items.length === 0) return;
-  const sheetName = SHEET_NAMES[storeName] || storeName;
-
-  // Update local cache
-  setCachedStore(storeName, items);
-
-  if (storeName === 'settings') {
-    return;
-  }
-
-  // Insert items to Google Apps Script mapped to exact sheet headers
-  for (const item of items) {
-    const anyItem = item as any;
-    const id = anyItem.id || anyItem.key;
-    const sheetRow = mapEntityToSheetRow(storeName, item);
-    await apiMutate(sheetName, 'create', sheetRow, id);
-  }
+export async function putItemsInStore<T>(
+  storeName: StoreName,
+  items: T[]
+): Promise<void> {
+  throw new Error(
+    'Bulk import and reset are disabled to protect existing records.'
+  );
 }
 
-export async function deleteItemFromStore(storeName: StoreName, id: string): Promise<void> {
+export async function deleteItemFromStore(
+  storeName: StoreName,
+  id: string
+): Promise<void> {
   const sheetName = SHEET_NAMES[storeName] || storeName;
 
   // Update local cache
   const cached = getCachedStore<any>(storeName) || [];
   const filtered = cached.filter((i) => (i.id ? i.id !== id : i.key !== id));
-  setCachedStore(storeName, filtered);
 
   if (storeName === 'settings') {
     return;
   }
 
-  await apiMutate(sheetName, 'delete', undefined, id);
+  const previous = cached.find((i) => i.id === id);
+  if (!previous?._revision)
+    throw new Error('Refresh this record before archiving.');
+  await apiMutate(sheetName, 'delete', undefined, id, {
+    expectedRevision: previous._revision,
+  });
+  storeRevision.set(storeName, (storeRevision.get(storeName) || 0) + 1);
+  setCachedStore(storeName, filtered);
 }
 
 export async function clearStore(storeName: StoreName): Promise<void> {
-  const sheetName = SHEET_NAMES[storeName] || storeName;
-  setCachedStore(storeName, []);
-
-  if (storeName === 'settings') {
-    return;
-  }
-
-  // Fetch all existing rows and delete them
-  try {
-    const current = await apiGet<any>(sheetName);
-    for (const item of current) {
-      const id = item.id || item.key;
-      if (id) {
-        await apiMutate(sheetName, 'delete', undefined, String(id));
-      }
-    }
-  } catch (err) {
-    console.warn(`[GAS] Clear store warning for ${sheetName}:`, err);
-  }
+  throw new Error(
+    'Bulk import and reset are disabled to protect existing records.'
+  );
 }
 
 export async function exportDatabase(): Promise<AppDatabaseSchema> {
@@ -961,7 +1075,7 @@ export async function exportDatabase(): Promise<AppDatabaseSchema> {
     emergencyFundTargetMonths: settingsObj.emergencyFundTargetMonths ?? 6,
     section80cLimit: settingsObj.section80cLimit ?? 150000,
     section80dLimit: settingsObj.section80dLimit ?? 25000,
-    activeMonth: settingsObj.activeMonth || new Date().toISOString().slice(0, 7),
+    activeMonth: settingsObj.activeMonth || localDate().slice(0, 7),
   };
 
   return {
@@ -985,64 +1099,23 @@ export async function exportDatabase(): Promise<AppDatabaseSchema> {
 }
 
 export async function importDatabase(data: AppDatabaseSchema): Promise<void> {
-  if (!data || typeof data !== 'object') {
-    throw new Error('Invalid JSON backup file');
-  }
-
-  // Populate stores
-  if (Array.isArray(data.accounts) && data.accounts.length > 0) {
-    await putItemsInStore('accounts', data.accounts);
-  }
-  if (Array.isArray(data.incomes) && data.incomes.length > 0) {
-    await putItemsInStore('incomes', data.incomes);
-  }
-  if (Array.isArray(data.expenses) && data.expenses.length > 0) {
-    await putItemsInStore('expenses', data.expenses);
-  }
-  if (Array.isArray(data.emis) && data.emis.length > 0) {
-    await putItemsInStore('emis', data.emis);
-  }
-  if (Array.isArray(data.emiPayments) && data.emiPayments.length > 0) {
-    await putItemsInStore('emiPayments', data.emiPayments);
-  }
-  if (Array.isArray(data.transfers) && data.transfers.length > 0) {
-    await putItemsInStore('transfers', data.transfers);
-  }
-  if (Array.isArray(data.creditCards) && data.creditCards.length > 0) {
-    await putItemsInStore('creditCards', data.creditCards);
-  }
-  if (Array.isArray(data.creditCardBills) && data.creditCardBills.length > 0) {
-    await putItemsInStore('creditCardBills', data.creditCardBills);
-  }
-  if (Array.isArray(data.savingsGoals) && data.savingsGoals.length > 0) {
-    await putItemsInStore('savingsGoals', data.savingsGoals);
-  }
-  if (Array.isArray(data.recurringBills) && data.recurringBills.length > 0) {
-    await putItemsInStore('recurringBills', data.recurringBills);
-  }
-  if (Array.isArray(data.taxSavings) && data.taxSavings.length > 0) {
-    await putItemsInStore('taxSavings', data.taxSavings);
-  }
-  if (Array.isArray(data.budgetCategories) && data.budgetCategories.length > 0) {
-    await putItemsInStore('budgetCategories', data.budgetCategories);
-  }
-  if (Array.isArray(data.netWorthSnapshots) && data.netWorthSnapshots.length > 0) {
-    await putItemsInStore('netWorthSnapshots', data.netWorthSnapshots);
-  }
-
-  const settingEntries = data.settings
-    ? Object.entries(data.settings).map(([key, value]) => ({ key, value }))
-    : [];
-
-  if (!settingEntries.some((s) => s.key === 'is_initialized')) {
-    settingEntries.push({ key: 'is_initialized', value: true });
-  }
-  await putItemsInStore('settings', settingEntries);
+  throw new Error(
+    'Bulk import and reset are disabled to protect existing records.'
+  );
 }
 
 export async function clearAllDatabaseData(): Promise<void> {
-  for (const s of STORES) {
-    await clearStore(s);
-  }
-  await putItemInStore('settings', { key: 'is_initialized', value: true });
+  throw new Error(
+    'Bulk import and reset are disabled to protect existing records.'
+  );
+}
+
+function parseArray(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  throw new Error('Invalid stored history. Record was not modified.');
 }

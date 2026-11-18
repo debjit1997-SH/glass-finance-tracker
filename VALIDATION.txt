@@ -1,0 +1,23 @@
+AuraFinance v2 integration package — 2026-11-16
+Base commit: e44d8eafcbded89f710fe50e71c5523a17ec6158
+Branch: upgrade/glass-safe-finance
+
+31 isolated tests passed, 0 failed:
+- Frontend rules, mappings, save/cache behavior and revision checks.
+- Apps Script backup/additive migration, ID preservation, formulas, archival and conflicts.
+- Session verification, origin checks and server proxy gating.
+All Sheet/network interactions in tests were mocked.
+
+TypeScript + Vite production build: PASS.
+Lint: exit 0; 77 warnings, 0 errors. Not a warning-free release.
+Git whitespace check: PASS.
+Browser visual QA: NOT VERIFIED; Chromium process-socket restriction blocked prior attempt.
+Live website: HTML fetched read-only; original index-Y9Ox0FWn.js bundle still referenced.
+Live Google Sheet requests: NONE.
+Real Google Sheet backup/migration/verification: NOT RUN.
+GitHub push / Vercel deployment: NOT PERFORMED.
+Client write mode: OFF by default.
+Apps Script server write mode: OFF until explicit editor setup/verification.
+
+A full Sheet-copy test and configured Vercel preview remain required before rollout.
+See SETUP_BN.md for exact steps and UPGRADE.md for limitations.

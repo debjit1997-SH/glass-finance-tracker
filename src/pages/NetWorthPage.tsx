@@ -1,3 +1,4 @@
+import { outstandingPrincipal } from '../services/financeRules';
 import React from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -54,7 +55,7 @@ export const NetWorthPage: React.FC = () => {
 
   const totalCurrentAssets = liquidTotal + cashTotal + investTotal;
 
-  const emiPrincipal = emis.reduce((sum, e) => sum + e.outstandingPrincipal, 0);
+  const emiPrincipal = emis.reduce((sum, e) => sum + outstandingPrincipal(e), 0);
   const creditCardsDebt = dashboardMetrics.totalCardOutstanding;
   const totalCurrentLiabilities = emiPrincipal + creditCardsDebt;
 

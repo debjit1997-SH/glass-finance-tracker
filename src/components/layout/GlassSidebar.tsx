@@ -20,6 +20,7 @@ import { useFinance } from '../../context/FinanceContext';
 export type NavTab =
   | 'dashboard'
   | 'accounts'
+  | 'account-adjustment'
   | 'income'
   | 'expenses'
   | 'budget'
@@ -67,6 +68,12 @@ export const GlassSidebar: React.FC<GlassSidebarProps> = ({
       id: 'accounts',
       label: 'Accounts',
       icon: <Wallet className="w-4 h-4" />,
+      group: 'Core',
+    },
+    {
+      id: 'account-adjustment',
+      label: 'Account adjustment',
+      icon: <ArrowLeftRight className="w-4 h-4" />,
       group: 'Core',
     },
     {
@@ -119,7 +126,7 @@ export const GlassSidebar: React.FC<GlassSidebarProps> = ({
     },
     {
       id: 'recurring-bills',
-      label: 'Subscriptions',
+      label: 'Recurring & templates',
       icon: <Repeat className="w-4 h-4" />,
       group: 'Advanced',
     },
@@ -194,7 +201,8 @@ export const GlassSidebar: React.FC<GlassSidebarProps> = ({
                       {item.badge && (
                         <span
                           className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                            item.badgeColor || 'bg-purple-500/20 text-purple-300'
+                            item.badgeColor ||
+                            'bg-purple-500/20 text-purple-300'
                           }`}
                         >
                           {item.badge}

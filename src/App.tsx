@@ -1,22 +1,80 @@
+import { AuthGate } from './components/AuthGate';
 import React, { useState } from 'react';
 import { FinanceProvider, useFinance } from './context/FinanceContext';
 import { GlassNavbar } from './components/layout/GlassNavbar';
 import { GlassSidebar, NavTab } from './components/layout/GlassSidebar';
 
 // Pages
-import { DashboardPage } from './pages/DashboardPage';
-import { AccountsPage } from './pages/AccountsPage';
-import { IncomePage } from './pages/IncomePage';
-import { ExpensesPage } from './pages/ExpensesPage';
-import { BudgetVsActualPage } from './pages/BudgetVsActualPage';
-import { EmiTrackerPage } from './pages/EmiTrackerPage';
-import { TransfersPage } from './pages/TransfersPage';
-import { CreditCardPage } from './pages/CreditCardPage';
-import { SavingsGoalsPage } from './pages/SavingsGoalsPage';
-import { NetWorthPage } from './pages/NetWorthPage';
-import { RecurringBillsPage } from './pages/RecurringBillsPage';
-import { TaxSaverPage } from './pages/TaxSaverPage';
-import { CashflowRunwayPage } from './pages/CashflowRunwayPage';
+const AccountAdjustmentPage = React.lazy(() =>
+  import('./pages/AccountAdjustmentPage').then((module) => ({
+    default: module.AccountAdjustmentPage,
+  }))
+);
+const DashboardPage = React.lazy(() =>
+  import('./pages/DashboardPage').then((module) => ({
+    default: module.DashboardPage,
+  }))
+);
+const AccountsPage = React.lazy(() =>
+  import('./pages/AccountsPage').then((module) => ({
+    default: module.AccountsPage,
+  }))
+);
+const IncomePage = React.lazy(() =>
+  import('./pages/IncomePage').then((module) => ({
+    default: module.IncomePage,
+  }))
+);
+const ExpensesPage = React.lazy(() =>
+  import('./pages/ExpensesPage').then((module) => ({
+    default: module.ExpensesPage,
+  }))
+);
+const BudgetVsActualPage = React.lazy(() =>
+  import('./pages/BudgetVsActualPage').then((module) => ({
+    default: module.BudgetVsActualPage,
+  }))
+);
+const EmiTrackerPage = React.lazy(() =>
+  import('./pages/EmiTrackerPage').then((module) => ({
+    default: module.EmiTrackerPage,
+  }))
+);
+const TransfersPage = React.lazy(() =>
+  import('./pages/TransfersPage').then((module) => ({
+    default: module.TransfersPage,
+  }))
+);
+const CreditCardPage = React.lazy(() =>
+  import('./pages/CreditCardPage').then((module) => ({
+    default: module.CreditCardPage,
+  }))
+);
+const SavingsGoalsPage = React.lazy(() =>
+  import('./pages/SavingsGoalsPage').then((module) => ({
+    default: module.SavingsGoalsPage,
+  }))
+);
+const NetWorthPage = React.lazy(() =>
+  import('./pages/NetWorthPage').then((module) => ({
+    default: module.NetWorthPage,
+  }))
+);
+const RecurringBillsPage = React.lazy(() =>
+  import('./pages/RecurringBillsPage').then((module) => ({
+    default: module.RecurringBillsPage,
+  }))
+);
+const TaxSaverPage = React.lazy(() =>
+  import('./pages/TaxSaverPage').then((module) => ({
+    default: module.TaxSaverPage,
+  }))
+);
+const CashflowRunwayPage = React.lazy(() =>
+  import('./pages/CashflowRunwayPage').then((module) => ({
+    default: module.CashflowRunwayPage,
+  }))
+);
 
 // Modals
 import { AddExpenseModal } from './components/modals/AddExpenseModal';
@@ -30,7 +88,14 @@ import { AddRecurringBillModal } from './components/modals/AddRecurringBillModal
 import { AddTaxSavingModal } from './components/modals/AddTaxSavingModal';
 import { BackupModal } from './components/modals/BackupModal';
 
-import { Sparkles, Menu, X, ArrowUpRight, ArrowDownLeft, ArrowLeftRight } from 'lucide-react';
+import {
+  Sparkles,
+  Menu,
+  X,
+  ArrowUpRight,
+  ArrowDownLeft,
+  ArrowLeftRight,
+} from 'lucide-react';
 
 const MainApp: React.FC = () => {
   const { loadPageData } = useFinance();
@@ -72,48 +137,55 @@ const MainApp: React.FC = () => {
             onOpenTransfer={() => setIsAddTransferOpen(true)}
           />
         );
+      case 'account-adjustment':
+        return <AccountAdjustmentPage />;
       case 'income':
         return <IncomePage onOpenAddIncome={() => setIsAddIncomeOpen(true)} />;
       case 'expenses':
-        return <ExpensesPage onOpenAddExpense={() => setIsAddExpenseOpen(true)} />;
+        return (
+          <ExpensesPage onOpenAddExpense={() => setIsAddExpenseOpen(true)} />
+        );
       case 'budget':
         return <BudgetVsActualPage />;
       case 'emi':
         return <EmiTrackerPage onOpenAddEmi={() => setIsAddEmiOpen(true)} />;
       case 'transfers':
-        return <TransfersPage onOpenAddTransfer={() => setIsAddTransferOpen(true)} />;
+        return (
+          <TransfersPage onOpenAddTransfer={() => setIsAddTransferOpen(true)} />
+        );
       case 'credit-cards':
         return <CreditCardPage onOpenAddCard={() => setIsAddCardOpen(true)} />;
       case 'savings-goals':
-        return <SavingsGoalsPage onOpenAddGoal={() => setIsAddGoalOpen(true)} />;
+        return (
+          <SavingsGoalsPage onOpenAddGoal={() => setIsAddGoalOpen(true)} />
+        );
       case 'net-worth':
         return <NetWorthPage />;
       case 'recurring-bills':
         return (
-          <RecurringBillsPage onOpenAddRecurring={() => setIsAddRecurringOpen(true)} />
+          <RecurringBillsPage
+            onOpenAddRecurring={() => setIsAddRecurringOpen(true)}
+          />
         );
       case 'tax-saver':
         return <TaxSaverPage onOpenAddTax={() => setIsAddTaxOpen(true)} />;
       case 'runway':
         return <CashflowRunwayPage />;
       default:
-        return <DashboardPage onNavigate={setActiveTab} onOpenExpense={() => setIsAddExpenseOpen(true)} onOpenIncome={() => setIsAddIncomeOpen(true)} onOpenTransfer={() => setIsAddTransferOpen(true)} />;
+        return (
+          <DashboardPage
+            onNavigate={setActiveTab}
+            onOpenExpense={() => setIsAddExpenseOpen(true)}
+            onOpenIncome={() => setIsAddIncomeOpen(true)}
+            onOpenTransfer={() => setIsAddTransferOpen(true)}
+          />
+        );
     }
   };
 
   return (
-    <div className="relative min-h-screen bg-[#070913] text-slate-100 flex flex-col overflow-x-hidden font-sans">
-      {/* Dynamic Vibrant Gradient Glass Background Orbs */}
-      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        {/* Top-right violet orb */}
-        <div className="absolute -top-[15%] -right-[10%] w-[650px] h-[650px] rounded-full bg-gradient-to-br from-purple-600/25 via-indigo-600/15 to-transparent blur-[120px]" />
-        {/* Center cyan-blue orb */}
-        <div className="absolute top-[35%] -left-[15%] w-[600px] h-[600px] rounded-full bg-gradient-to-tr from-cyan-600/20 via-blue-600/15 to-transparent blur-[130px]" />
-        {/* Bottom rose-magenta orb */}
-        <div className="absolute -bottom-[10%] right-[20%] w-[550px] h-[550px] rounded-full bg-gradient-to-tl from-rose-600/15 via-purple-600/10 to-transparent blur-[120px]" />
-        {/* Ambient indigo wash */}
-        <div className="absolute top-[60%] left-[30%] w-[500px] h-[500px] rounded-full bg-indigo-900/15 blur-[140px]" />
-      </div>
+    <div className="app-shell relative min-h-screen bg-[#070913] text-slate-100 flex flex-col overflow-x-hidden font-sans">
+      <div className="ambient-texture" aria-hidden="true" />
 
       {/* Glass Top Navigation */}
       <GlassNavbar
@@ -141,7 +213,11 @@ const MainApp: React.FC = () => {
               onClick={() => setIsMobileNavOpen(!isMobileNavOpen)}
               className="flex items-center gap-2 text-xs font-semibold text-purple-300"
             >
-              {isMobileNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              {isMobileNavOpen ? (
+                <X className="w-4 h-4" />
+              ) : (
+                <Menu className="w-4 h-4" />
+              )}
               <span>{isMobileNavOpen ? 'Close Menu' : 'Browse All Pages'}</span>
             </button>
             <span className="text-xs font-bold text-white capitalize">
@@ -149,13 +225,36 @@ const MainApp: React.FC = () => {
             </span>
           </div>
 
+          {import.meta.env.VITE_ENABLE_UPGRADE_WRITES !== 'true' && (
+            <div
+              role="status"
+              className="mb-5 rounded-xl border border-indigo-400/30 bg-indigo-500/10 p-3 text-xs text-indigo-300"
+            >
+              Read-only preview · Saves are locked until your Apps Script and
+              Sheet backup are verified. Existing data is protected.
+            </div>
+          )}
           {/* Active View Component */}
-          {renderActivePage()}
+          <React.Suspense
+            fallback={
+              <div
+                className="glass-panel rounded-2xl p-8 text-sm"
+                role="status"
+              >
+                Loading page…
+              </div>
+            }
+          >
+            {renderActivePage()}
+          </React.Suspense>
         </main>
       </div>
 
       {/* All Application Modals */}
-      <BackupModal isOpen={isBackupOpen} onClose={() => setIsBackupOpen(false)} />
+      <BackupModal
+        isOpen={isBackupOpen}
+        onClose={() => setIsBackupOpen(false)}
+      />
       <AddExpenseModal
         isOpen={isAddExpenseOpen}
         onClose={() => setIsAddExpenseOpen(false)}
@@ -168,12 +267,18 @@ const MainApp: React.FC = () => {
         isOpen={isAddTransferOpen}
         onClose={() => setIsAddTransferOpen(false)}
       />
-      <AddEmiModal isOpen={isAddEmiOpen} onClose={() => setIsAddEmiOpen(false)} />
+      <AddEmiModal
+        isOpen={isAddEmiOpen}
+        onClose={() => setIsAddEmiOpen(false)}
+      />
       <AddAccountModal
         isOpen={isAddAccountOpen}
         onClose={() => setIsAddAccountOpen(false)}
       />
-      <AddGoalModal isOpen={isAddGoalOpen} onClose={() => setIsAddGoalOpen(false)} />
+      <AddGoalModal
+        isOpen={isAddGoalOpen}
+        onClose={() => setIsAddGoalOpen(false)}
+      />
       <AddCreditCardModal
         isOpen={isAddCardOpen}
         onClose={() => setIsAddCardOpen(false)}
@@ -190,7 +295,10 @@ const MainApp: React.FC = () => {
   );
 };
 
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -214,7 +322,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
             </div>
             <h2 className="text-lg font-bold">Something went wrong</h2>
             <p className="text-xs text-slate-400">
-              {this.state.error?.message || 'An unexpected rendering error occurred.'}
+              {this.state.error?.message ||
+                'An unexpected rendering error occurred.'}
             </p>
             <button
               onClick={() => {
@@ -236,9 +345,11 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 export default function App() {
   return (
     <ErrorBoundary>
-      <FinanceProvider>
-        <MainApp />
-      </FinanceProvider>
+      <AuthGate>
+        <FinanceProvider>
+          <MainApp />
+        </FinanceProvider>
+      </AuthGate>
     </ErrorBoundary>
   );
 }

@@ -1,3 +1,5 @@
+import { TransactionFilters, emptyTransactionFilter, matchesTransaction } from '../components/TransactionFilters';
+import { localDate } from '../services/financeRules';
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -28,6 +30,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
     accounts,
     budgetCategories,
     selectedMonth,
+    addExpense,
     updateExpense,
     deleteExpense,
     markExpensePaid,
@@ -35,14 +38,17 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
     isStoreLoading,
   } = useFinance();
 
+  const [filters, setFilters] = useState(emptyTransactionFilter);
+  const [formError, setFormError] = useState('');
+  const [formBusy, setFormBusy] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Paid' | 'Pending' | 'Overdue'>('All');
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
 
   // Filter by month
-  const monthlyExpenses = expenses.filter((e) => e.date.startsWith(selectedMonth));
+  const monthlyExpenses = expenses.filter((e) => (filters.allMonths || e.date.startsWith(selectedMonth)) && matchesTransaction(e, filters));
 
   // Category & Status filter
   const filteredExpenses = monthlyExpenses.filter((e) => {
@@ -54,7 +60,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
   const totalExpected = monthlyExpenses.reduce((s, e) => s + e.expectedAmount, 0);
   const totalPaid = monthlyExpenses
     .filter((e) => e.status === 'Paid')
-    .reduce((s, e) => s + (e.actualAmount || e.expectedAmount), 0);
+    .reduce((s, e) => s + (e.actualAmount ?? e.expectedAmount), 0);
   const totalPending = monthlyExpenses
     .filter((e) => e.status === 'Pending' || e.status === 'Overdue')
     .reduce((s, e) => s + e.expectedAmount, 0);
@@ -65,8 +71,12 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingExpense) return;
-    await updateExpense(editingExpense);
-    setEditingExpense(null);
+    setFormBusy(true); setFormError('');
+    try {
+      if (editingExpense.id) await updateExpense(editingExpense);
+      else await addExpense(editingExpense);
+      setEditingExpense(null);
+    } catch (error: any) { setFormError(error.message); } finally { setFormBusy(false); }
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -94,6 +104,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
+      <TransactionFilters value={filters} onChange={setFilters} accounts={accounts}/>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -261,7 +272,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                       <td className="py-3.5 px-4 font-mono font-bold text-rose-400 whitespace-nowrap">
                         {isPaid ? (
                           `${settings.currency}${(
-                            exp.actualAmount || exp.expectedAmount
+                            exp.actualAmount ?? exp.expectedAmount
                           ).toLocaleString('en-IN')}`
                         ) : (
                           <span className="text-slate-500">—</span>
@@ -298,6 +309,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                               <CheckCircle2 className="w-3 h-3" /> Mark Paid
                             </button>
                           )}
+                          <button type="button" title="Copy as new pending entry" className="text-xs text-indigo-300 px-2" onClick={() => { setFormError(''); setEditingExpense({...exp, id: '', date: localDate(), actualAmount: 0, actualDate: '', status: 'Pending'}); }}>Copy</button>
                           <button
                             onClick={() => setEditingExpense(exp)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -328,10 +340,11 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
         <GlassModal
           isOpen={true}
           onClose={() => setEditingExpense(null)}
-          title="Edit Expense Record"
+          title={editingExpense?.id ? "Edit Expense Record" : "Copy as new expense"}
           subtitle="Modify details, account debited, or mark as paid"
         >
           <form onSubmit={handleEditSubmit} className="space-y-4">
+            {formError && <p role="alert" className="text-sm text-rose-300">{formError}</p>}
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 Expense Name
@@ -486,7 +499,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onOpenAddExpense }) 
                 Cancel
               </button>
               <button
-                type="submit"
+                type="submit" disabled={formBusy}
                 className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-semibold"
               >
                 Save Changes

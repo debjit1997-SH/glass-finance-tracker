@@ -1,3 +1,4 @@
+import { localDate } from '../../services/financeRules';
 import React, { useState } from 'react';
 import { GlassModal } from '../ui/GlassModal';
 import { GlassDatePicker } from '../ui/GlassDatePicker';
@@ -12,7 +13,7 @@ interface AddIncomeModalProps {
 export const AddIncomeModal: React.FC<AddIncomeModalProps> = ({ isOpen, onClose }) => {
   const { accounts, addIncome, settings } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
   const [date, setDate] = useState(todayStr);
   const [source, setSource] = useState('');
   const [expectedAmount, setExpectedAmount] = useState('');

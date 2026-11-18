@@ -1,3 +1,4 @@
+import { localDate } from '../../services/financeRules';
 import React, { useState } from 'react';
 import { GlassModal } from '../ui/GlassModal';
 import { GlassDatePicker } from '../ui/GlassDatePicker';
@@ -12,7 +13,7 @@ interface AddTransferModalProps {
 export const AddTransferModal: React.FC<AddTransferModalProps> = ({ isOpen, onClose }) => {
   const { accounts, addTransfer, settings } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
   const [date, setDate] = useState(todayStr);
   const [fromAccountId, setFromAccountId] = useState(accounts[0]?.id || '');
   const [toAccountId, setToAccountId] = useState(accounts[1]?.id || accounts[0]?.id || '');

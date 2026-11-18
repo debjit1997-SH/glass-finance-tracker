@@ -1,3 +1,4 @@
+import { localDate } from '../../services/financeRules';
 import React, { useState } from 'react';
 import { GlassModal } from '../ui/GlassModal';
 import { GlassDatePicker } from '../ui/GlassDatePicker';
@@ -13,7 +14,7 @@ interface AddEmiModalProps {
 export const AddEmiModal: React.FC<AddEmiModalProps> = ({ isOpen, onClose }) => {
   const { accounts, addEmi, settings } = useFinance();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDate();
   const [loanName, setLoanName] = useState('');
   const [lender, setLender] = useState('');
   const [monthlyAmount, setMonthlyAmount] = useState('');

@@ -1,3 +1,5 @@
+import { localDate } from './financeRules';
+import { outstandingPrincipal } from './financeRules';
 import {
   Account,
   Income,
@@ -7,6 +9,7 @@ import {
   MonthlyEmiInstance,
   AccountTransfer,
   CreditCard,
+  CreditCardBill,
   SavingsGoal,
   RecurringBill,
   TaxSavingItem,
@@ -48,12 +51,19 @@ export function getMonthlyEmiInstances(
   loans: EmiLoan[],
   payments: EmiPayment[] = [],
   monthStr: string,
-  todayStr: string = new Date().toISOString().slice(0, 10)
+  todayStr: string = localDate()
 ): MonthlyEmiInstance[] {
   const [currYear, currM] = monthStr.split('-').map(Number);
   const instances: MonthlyEmiInstance[] = [];
 
-  for (const loan of loans) {
+  for (const storedLoan of loans) {
+    // Earlier monthly schedules remain intact after a later part-payment.
+    const laterEvents = [...(storedLoan.loanEvents || [])].filter(e => e.date.slice(0,7) > monthStr).sort((a,b) => b.date.localeCompare(a.date));
+    const loan = { ...storedLoan };
+    for (const event of laterEvents) {
+      loan.monthlyAmount = event.previousMonthlyAmount;
+      loan.totalInstallments = event.previousTotalInstallments;
+    }
     const startDate = loan.startDate || loan.dueDate || `${monthStr}-01`;
     const startMonth = startDate.slice(0, 7);
     const [startYear, startM] = startMonth.split('-').map(Number);
@@ -77,6 +87,8 @@ export function getMonthlyEmiInstances(
 
     const derivedDueDate = deriveDueDateForMonth(loan.dueDate || startDate, monthStr);
     const payment = payments.find((p) => p.loanId === loan.id && p.month === monthStr);
+
+    if (loan.lifecycle === 'Closed' && loan.closureDate && derivedDueDate >= loan.closureDate && !payment) continue;
 
     let status: EmiLoan['status'];
     let paidDate: string | undefined;
@@ -156,7 +168,7 @@ export function calculateLiveBalances(
   incomes.forEach((inc) => {
     if (inc.status === 'Received' && balanceMap.has(inc.accountId)) {
       const current = balanceMap.get(inc.accountId) || 0;
-      balanceMap.set(inc.accountId, current + (inc.actualAmount || inc.expectedAmount));
+      balanceMap.set(inc.accountId, current + (inc.actualAmount ?? inc.expectedAmount));
     }
   });
 
@@ -178,7 +190,7 @@ export function calculateLiveBalances(
   expenses.forEach((exp) => {
     if (exp.status === 'Paid' && balanceMap.has(exp.accountId)) {
       const current = balanceMap.get(exp.accountId) || 0;
-      balanceMap.set(exp.accountId, current - (exp.actualAmount || exp.expectedAmount));
+      balanceMap.set(exp.accountId, current - (exp.actualAmount ?? exp.expectedAmount));
     }
   });
 
@@ -186,7 +198,7 @@ export function calculateLiveBalances(
   emiPayments.forEach((p) => {
     if (p.status === 'Paid' && balanceMap.has(p.accountId)) {
       const current = balanceMap.get(p.accountId) || 0;
-      balanceMap.set(p.accountId, current - (p.paidAmount || p.amount));
+      balanceMap.set(p.accountId, current - (p.paidAmount ?? p.amount));
     }
   });
 
@@ -216,27 +228,28 @@ export function calculateDashboardMetrics(
   expenses: Expense[],
   emis: EmiLoan[],
   creditCards: CreditCard[],
-  emiPayments: EmiPayment[] = []
+  emiPayments: EmiPayment[] = [],
+  creditCardBills: CreditCardBill[] = []
 ) {
   // Total Income this month
   const monthlyIncomes = incomes.filter((i) => i.date.startsWith(month));
   const totalIncome = monthlyIncomes.reduce(
-    (sum, i) => sum + (i.status === 'Received' ? i.actualAmount || i.expectedAmount : i.expectedAmount),
+    (sum, i) => sum + (i.status === 'Received' ? i.actualAmount ?? i.expectedAmount : i.expectedAmount),
     0
   );
   const receivedIncome = monthlyIncomes
     .filter((i) => i.status === 'Received')
-    .reduce((sum, i) => sum + (i.actualAmount || i.expectedAmount), 0);
+    .reduce((sum, i) => sum + (i.actualAmount ?? i.expectedAmount), 0);
 
   // Total Expense excl. EMI this month
   const monthlyExpenses = expenses.filter((e) => e.date.startsWith(month));
   const totalExpense = monthlyExpenses.reduce(
-    (sum, e) => sum + (e.status === 'Paid' ? e.actualAmount || e.expectedAmount : e.expectedAmount),
+    (sum, e) => sum + (e.status === 'Paid' ? e.actualAmount ?? e.expectedAmount : e.expectedAmount),
     0
   );
   const paidExpense = monthlyExpenses
     .filter((e) => e.status === 'Paid')
-    .reduce((sum, e) => sum + (e.actualAmount || e.expectedAmount), 0);
+    .reduce((sum, e) => sum + (e.actualAmount ?? e.expectedAmount), 0);
 
   // Total EMI this month using per-month active instances
   const monthlyEmis = getMonthlyEmiInstances(emis, emiPayments, month);
@@ -251,12 +264,7 @@ export function calculateDashboardMetrics(
 
   // Total Outstanding Credit Card Balance
   // Sum of unbilled + any statement dues or absolute negative balances on card accounts
-  const totalCardOutstanding = creditCards.reduce((sum, card) => {
-    const cardAccountBalance = liveBalances.get(card.accountId) || 0;
-    // If account balance is negative, that's debt; plus manual unbilled
-    const liabilityFromAccount = cardAccountBalance < 0 ? Math.abs(cardAccountBalance) : 0;
-    return sum + liabilityFromAccount + (card.currentUnbilled || 0);
-  }, 0);
+  const totalCardOutstanding = creditCardBills.reduce((sum, bill) => sum + Math.max(0, bill.billAmount - bill.amountPaid), 0);
 
   // Savings Rate % = (Total Income − Total Expense − Total EMI) ÷ Total Income
   const netSavings = totalIncome - totalExpense - totalEmi;
@@ -284,7 +292,7 @@ export function getDueSoonItems(
   emis: EmiLoan[],
   recurringBills: RecurringBill[],
   accounts: Account[],
-  currentDateStr: string = new Date().toISOString().slice(0, 10),
+  currentDateStr: string = localDate(),
   emiPayments: EmiPayment[] = []
 ): DueSoonItem[] {
   const today = new Date(currentDateStr);
@@ -356,7 +364,7 @@ export function getDueSoonItems(
   });
 
   // Recurring Bills
-  recurringBills.forEach((bill) => {
+  recurringBills.filter(b => !b.templateEnabled).forEach((bill) => {
     const due = new Date(bill.nextRenewalDate);
     due.setHours(0, 0, 0, 0);
     const diffDays = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -418,14 +426,14 @@ export function calculateEmergencyFundHealth(
   const monthlyTotals = pastMonths.map((m) => {
     return expenses
       .filter((e) => e.date.startsWith(m) && e.status === 'Paid')
-      .reduce((sum, e) => sum + (e.actualAmount || e.expectedAmount), 0);
+      .reduce((sum, e) => sum + (e.actualAmount ?? e.expectedAmount), 0);
   });
 
   const sumExpenses = monthlyTotals.reduce((a, b) => a + b, 0);
   // If no past 3 months data yet, fallback to current month or reasonable benchmark
   const currentMonthExpense = expenses
     .filter((e) => e.date.startsWith(currentMonth))
-    .reduce((sum, e) => sum + (e.actualAmount || e.expectedAmount), 0);
+    .reduce((sum, e) => sum + (e.actualAmount ?? e.expectedAmount), 0);
 
   const avgExpense = sumExpenses > 0 ? sumExpenses / 3 : Math.max(currentMonthExpense, 1);
   const monthsCovered = avgExpense > 0 ? currentEmergencyFund / avgExpense : 0;
@@ -472,7 +480,7 @@ export interface PayoffPlanResult {
 export function calculateDebtPayoff(
   loans: EmiLoan[],
   extraMonthlyPayment: number = 0,
-  startDateStr: string = new Date().toISOString().slice(0, 10)
+  startDateStr: string = localDate()
 ): { avalanche: PayoffPlanResult; snowball: PayoffPlanResult } {
   const runSimulation = (strategy: 'Avalanche' | 'Snowball'): PayoffPlanResult => {
     if (!loans.length) {
@@ -610,7 +618,7 @@ export function calculateCashflowRunway(
   incomes: Income[],
   expenses: Expense[],
   emis: EmiLoan[],
-  todayStr: string = new Date().toISOString().slice(0, 10),
+  todayStr: string = localDate(),
   emiPayments: EmiPayment[] = []
 ): {
   days: RunwayDay[];
@@ -652,13 +660,13 @@ export function calculateCashflowRunway(
     const events: RunwayDay['events'] = [];
 
     dayIncomes.forEach((i) => {
-      const amt = i.status === 'Received' ? i.actualAmount || i.expectedAmount : i.expectedAmount;
+      const amt = i.status === 'Received' ? i.actualAmount ?? i.expectedAmount : i.expectedAmount;
       incomingTotal += amt;
       events.push({ type: 'income', title: i.source, amount: amt, status: i.status });
     });
 
     dayExpenses.forEach((e) => {
-      const amt = e.status === 'Paid' ? e.actualAmount || e.expectedAmount : e.expectedAmount;
+      const amt = e.status === 'Paid' ? e.actualAmount ?? e.expectedAmount : e.expectedAmount;
       outgoingTotal += amt;
       events.push({ type: 'expense', title: e.name, amount: amt, status: e.status });
     });
@@ -736,7 +744,7 @@ export function calculateCashflowRunway(
  */
 export function calculateTaxSavings(
   items: TaxSavingItem[],
-  currentDateStr: string = new Date().toISOString().slice(0, 10),
+  currentDateStr: string = localDate(),
   limit80c: number = 150000,
   limit80d: number = 25000
 ) {

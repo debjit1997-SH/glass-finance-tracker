@@ -1,3 +1,4 @@
+import { QuickEntry } from '../components/QuickEntry';
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { GlassCard } from '../components/ui/GlassCard';
@@ -99,12 +100,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       // Income in month
       const incTotal = incomes
         .filter((inc) => inc.date.startsWith(key))
-        .reduce((s, inc) => s + (inc.status === 'Received' ? inc.actualAmount || inc.expectedAmount : inc.expectedAmount), 0);
+        .reduce((s, inc) => s + (inc.status === 'Received' ? inc.actualAmount ?? inc.expectedAmount : inc.expectedAmount), 0);
 
       // Expense in month
       const expTotal = expenses
         .filter((exp) => exp.date.startsWith(key))
-        .reduce((s, exp) => s + (exp.status === 'Paid' ? exp.actualAmount || exp.expectedAmount : exp.expectedAmount), 0);
+        .reduce((s, exp) => s + (exp.status === 'Paid' ? exp.actualAmount ?? exp.expectedAmount : exp.expectedAmount), 0);
 
       // EMI in month using active monthly instances
       const monthlyInstances = getMonthlyEmiInstances(emis, emiPayments, key);
@@ -157,6 +158,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
+      <QuickEntry/>
       {/* Due Soon Banner */}
       <DueSoonBanner />
 
